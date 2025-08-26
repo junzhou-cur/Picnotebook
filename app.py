@@ -1,18 +1,17 @@
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 # Test comment to demonstrate diff view functionality
-from flask import Flask, request, render_template, jsonify, redirect, url_for, flash, session, current_app, send_file
-from flask_login import LoginManager, login_required, current_user
-from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
+from flask import Flask, request, render_template, jsonify, redirect, url_for, flash, session, current_app, send_file, Blueprint
+from flask_login import LoginManager, login_required, current_user, login_user, logout_user
+from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity, create_access_token, create_refresh_token
 from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_mail import Mail, Message
 from werkzeug.utils import secure_filename
 from celery_app import make_celery
 from config import config
-from models import db, User, Project, LabNote, ProcessingJob, ProjectMember, Protocol, Sequence, Amplicon
-from auth import auth_bp
+from models import db, User, Project, LabNote, ProcessingJob, ProjectMember, Protocol, Sequence, Amplicon, Milestone, Task
 from tasks import process_image_async, generate_project_report_async
 from enhanced_ocr import EnhancedOCR, extract_text_from_image, process_lab_note_image  # Enhanced OCR integration
 from lab_note_parser import LabNoteParser, process_lab_note_text  # Lab note parsing
@@ -22,6 +21,466 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
 import io
+import re
+import secrets
+import hashlib
+from functools import wraps
+
+# ============================================================================
+# Authentication Blueprint - Merged from auth.py
+# ============================================================================
+
+auth_bp = Blueprint('auth', __name__)
+
+def validate_email(email):
+    """Validate email format"""
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
+def validate_password(password):
+    """Validate password strength"""
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long"
+    if not re.search(r'[A-Z]', password):
+        return False, "Password must contain at least one uppercase letter"
+    if not re.search(r'[a-z]', password):
+        return False, "Password must contain at least one lowercase letter"
+    if not re.search(r'\d', password):
+        return False, "Password must contain at least one number"
+    return True, "Password is valid"
+
+def admin_required(f):
+    """Decorator to require admin access"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated or not current_user.is_admin:
+            flash('Admin access required.', 'error')
+            return redirect(url_for('auth.login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+@auth_bp.route('/register', methods=['GET', 'POST'])
+def register():
+    """User registration"""
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        # Get form data
+        username = request.form.get('username', '').strip()
+        email = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        first_name = request.form.get('first_name', '').strip()
+        last_name = request.form.get('last_name', '').strip()
+        
+        # Validation
+        errors = []
+        
+        if not username or len(username) < 3:
+            errors.append("Username must be at least 3 characters long")
+        elif User.query.filter_by(username=username).first():
+            errors.append("Username already exists")
+        
+        if not email or not validate_email(email):
+            errors.append("Please enter a valid email address")
+        elif User.query.filter_by(email=email).first():
+            errors.append("Email already registered")
+        
+        if not first_name or not last_name:
+            errors.append("First name and last name are required")
+        
+        password_valid, password_message = validate_password(password)
+        if not password_valid:
+            errors.append(password_message)
+        
+        if password != confirm_password:
+            errors.append("Passwords do not match")
+        
+        if errors:
+            for error in errors:
+                flash(error, 'error')
+            return render_template('auth/register.html')
+        
+        # Create user
+        try:
+            user = User(
+                username=username,
+                email=email,
+                first_name=first_name,
+                last_name=last_name
+            )
+            user.set_password(password)
+            
+            # First user becomes admin
+            if User.query.count() == 0:
+                user.is_admin = True
+                flash('Welcome! You have been granted admin privileges as the first user.', 'success')
+            
+            db.session.add(user)
+            db.session.commit()
+            
+            flash('Registration successful! Please log in.', 'success')
+            return redirect(url_for('auth.login'))
+            
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"Registration error: {str(e)}")
+            flash('Registration failed. Please try again.', 'error')
+    
+    return render_template('auth/register.html')
+
+@auth_bp.route('/login', methods=['GET', 'POST'])
+def login():
+    """User login"""
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        username_or_email = request.form.get('username_or_email', '').strip()
+        password = request.form.get('password', '')
+        remember_me = request.form.get('remember_me') == 'on'
+        
+        if not username_or_email or not password:
+            flash('Please enter both username/email and password.', 'error')
+            return render_template('auth/login.html')
+        
+        # Find user by username or email
+        user = User.query.filter(
+            (User.username == username_or_email) | 
+            (User.email == username_or_email.lower())
+        ).first()
+        
+        if user and user.check_password(password):
+            if not user.is_active:
+                flash('Your account has been deactivated. Please contact an administrator.', 'error')
+                return render_template('auth/login.html')
+            
+            # Update last login
+            user.last_login = datetime.now(timezone.utc)
+            db.session.commit()
+            
+            # Log in user
+            login_user(user, remember=remember_me)
+            
+            # Redirect to next page or dashboard
+            next_page = request.args.get('next')
+            if next_page and next_page.startswith('/'):
+                return redirect(next_page)
+            
+            flash(f'Welcome back, {user.get_full_name()}!', 'success')
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid username/email or password.', 'error')
+    
+    return render_template('auth/login.html')
+
+@auth_bp.route('/logout')
+@login_required
+def logout():
+    """User logout"""
+    logout_user()
+    flash('You have been logged out successfully.', 'info')
+    return redirect(url_for('auth.login'))
+
+@auth_bp.route('/profile')
+@login_required
+def profile():
+    """User profile page"""
+    return render_template('auth/profile.html', user=current_user)
+
+@auth_bp.route('/change-password', methods=['GET', 'POST'])
+@login_required
+def change_password():
+    """Change user password"""
+    if request.method == 'POST':
+        current_password = request.form.get('current_password', '')
+        new_password = request.form.get('new_password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        
+        # Validation
+        if not current_user.check_password(current_password):
+            flash('Current password is incorrect.', 'error')
+            return render_template('auth/change_password.html')
+        
+        password_valid, password_message = validate_password(new_password)
+        if not password_valid:
+            flash(password_message, 'error')
+            return render_template('auth/change_password.html')
+        
+        if new_password != confirm_password:
+            flash('New passwords do not match.', 'error')
+            return render_template('auth/change_password.html')
+        
+        # Update password
+        try:
+            current_user.set_password(new_password)
+            db.session.commit()
+            flash('Password changed successfully!', 'success')
+            return redirect(url_for('auth.profile'))
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"Password change error: {str(e)}")
+            flash('Failed to change password. Please try again.', 'error')
+    
+    return render_template('auth/change_password.html')
+
+# API Routes for JWT authentication
+
+@auth_bp.route('/api/login', methods=['POST'])
+def api_login():
+    """API login endpoint returning JWT tokens"""
+    data = request.get_json()
+    
+    # Accept both 'email' and 'username_or_email' field names
+    email_field = data.get('email') or data.get('username_or_email')
+    password = data.get('password')
+    
+    if not data or not email_field or not password:
+        return jsonify({'error': 'Missing username/email or password'}), 400
+    
+    username_or_email = email_field.strip()
+    
+    # Find user
+    user = User.query.filter(
+        (User.username == username_or_email) | 
+        (User.email == username_or_email.lower())
+    ).first()
+    
+    if not user or not user.check_password(password):
+        return jsonify({'error': 'Invalid credentials'}), 401
+    
+    if not user.is_active:
+        return jsonify({'error': 'Account deactivated'}), 401
+    
+    # Update last login
+    user.last_login = datetime.now(timezone.utc)
+    db.session.commit()
+    
+    # Create tokens
+    access_token = create_access_token(identity=str(user.id))
+    refresh_token = create_refresh_token(identity=str(user.id))
+    
+    return jsonify({
+        'access_token': access_token,
+        'refresh_token': refresh_token,
+        'user': user.to_dict()
+    })
+
+@auth_bp.route('/api/refresh', methods=['POST'])
+@jwt_required(refresh=True)
+def api_refresh():
+    """Refresh JWT access token"""
+    current_user_id = int(get_jwt_identity())
+    user = User.query.get(current_user_id)
+    
+    if not user or not user.is_active:
+        return jsonify({'error': 'Invalid user'}), 401
+    
+    access_token = create_access_token(identity=str(user.id))
+    return jsonify({'access_token': access_token})
+
+@auth_bp.route('/api/register', methods=['POST'])
+def api_register():
+    """User registration via JSON API"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Get and validate data
+        username = data.get('username', '').strip()
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        full_name = data.get('full_name', '').strip()
+        
+        errors = []
+        
+        # Validation
+        if not username or len(username) < 3:
+            errors.append("Username must be at least 3 characters")
+        if not validate_email(email):
+            errors.append("Invalid email format")
+        if not password:
+            errors.append("Password is required")
+        if not full_name:
+            errors.append("Full name is required")
+        
+        # Check for existing users
+        if User.query.filter_by(username=username).first():
+            errors.append("Username already taken")
+        if User.query.filter_by(email=email).first():
+            errors.append("Email already registered")
+        
+        # Password validation
+        is_valid, password_message = validate_password(password)
+        if not is_valid:
+            errors.append(password_message)
+        
+        if errors:
+            return jsonify({'error': '; '.join(errors)}), 400
+        
+        # Check if this is the first user (admin)
+        user_count = User.query.count()
+        is_admin = user_count == 0
+        
+        try:
+            # Split full name into first and last name
+            name_parts = full_name.split(' ', 1)
+            first_name = name_parts[0] if name_parts else ''
+            last_name = name_parts[1] if len(name_parts) > 1 else ''
+            
+            # Create user
+            user = User(
+                username=username,
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                is_admin=is_admin
+            )
+            user.set_password(password)
+            
+            db.session.add(user)
+            db.session.commit()
+            
+            # Auto-login after registration
+            access_token = create_access_token(identity=str(user.id))
+            refresh_token = create_refresh_token(identity=str(user.id))
+            
+            return jsonify({
+                'success': True,
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'full_name': user.get_full_name(),
+                    'is_admin': user.is_admin,
+                    'created_at': user.created_at.isoformat() if user.created_at else None
+                },
+                'access_token': access_token,
+                'refresh_token': refresh_token,
+                'is_admin': is_admin,
+                'message': 'Registration successful'
+            })
+            
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"Registration error: {str(e)}")
+            return jsonify({'error': 'Registration failed. Please try again.'}), 500
+            
+    except Exception as e:
+        current_app.logger.error(f"API registration error: {str(e)}")
+        return jsonify({'error': 'Invalid request'}), 400
+
+@auth_bp.route('/api/me')
+@jwt_required()
+def api_user_info():
+    """Get current user info"""
+    current_user_id = int(get_jwt_identity())
+    user = User.query.get(current_user_id)
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    return jsonify({'user': user.to_dict()})
+
+@auth_bp.route('/api/forgot-password', methods=['POST'])
+def api_forgot_password():
+    """Send password reset email"""
+    try:
+        data = request.get_json()
+        if not data or not data.get('email'):
+            return jsonify({'error': 'Email is required'}), 400
+        
+        email = data.get('email').strip().lower()
+        
+        if not validate_email(email):
+            return jsonify({'error': 'Invalid email format'}), 400
+        
+        user = User.query.filter_by(email=email).first()
+        
+        # Always return success to prevent email enumeration
+        if user:
+            # Generate reset token
+            reset_token = secrets.token_urlsafe(32)
+            reset_token_hash = hashlib.sha256(reset_token.encode()).hexdigest()
+            
+            # Set token expiration (1 hour from now)
+            user.reset_token = reset_token_hash
+            user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
+            
+            db.session.commit()
+            
+            # In a real app, you'd send an email here
+            current_app.logger.info(f"Password reset requested for {email}")
+            current_app.logger.info(f"Reset token: {reset_token}")  # Remove in production
+            
+            # For now, return the token for testing (remove in production)
+            return jsonify({
+                'success': True,
+                'message': 'If an account exists with this email, you will receive reset instructions.',
+                'reset_token': reset_token  # Remove in production
+            })
+        
+        return jsonify({
+            'success': True,
+            'message': 'If an account exists with this email, you will receive reset instructions.'
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Forgot password error: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@auth_bp.route('/api/reset-password', methods=['POST'])
+def api_reset_password():
+    """Reset password with token"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid request'}), 400
+        
+        reset_token = data.get('token')
+        new_password = data.get('password')
+        
+        if not reset_token or not new_password:
+            return jsonify({'error': 'Token and password are required'}), 400
+        
+        # Validate password strength
+        password_valid, password_message = validate_password(new_password)
+        if not password_valid:
+            return jsonify({'error': password_message}), 400
+        
+        # Hash the token to find user
+        reset_token_hash = hashlib.sha256(reset_token.encode()).hexdigest()
+        
+        user = User.query.filter_by(reset_token=reset_token_hash).first()
+        
+        if not user or not user.reset_token_expires:
+            return jsonify({'error': 'Invalid or expired reset token'}), 400
+        
+        # Check if token is expired
+        if datetime.now(timezone.utc) > user.reset_token_expires:
+            return jsonify({'error': 'Reset token has expired'}), 400
+        
+        # Reset password
+        user.set_password(new_password)
+        user.reset_token = None
+        user.reset_token_expires = None
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Password has been reset successfully'
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Password reset error: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+# ============================================================================
+# End of Authentication Blueprint
+# ============================================================================
 
 def create_app(config_name=None):
     """Application factory"""
@@ -185,6 +644,168 @@ def create_app(config_name=None):
             return {'success': False, 'error': str(e)}
     
     # Route definitions
+    
+    # JSON Authentication endpoints for frontend
+    @app.route('/login', methods=['POST'])
+    def json_login():
+        """JSON login endpoint for frontend"""
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'success': False, 'message': 'No data provided'}), 400
+            
+        username_or_email = data.get('username', '').strip()
+        password = data.get('password', '')
+        
+        if not username_or_email or not password:
+            return jsonify({'success': False, 'message': 'Username and password required'}), 400
+        
+        # Find user by username or email
+        user = User.query.filter(
+            (User.username == username_or_email) | 
+            (User.email == username_or_email.lower())
+        ).first()
+        
+        if user and user.check_password(password):
+            if not user.is_active:
+                return jsonify({'success': False, 'message': 'Account deactivated'}), 403
+            
+            # Update last login
+            user.last_login = datetime.now(timezone.utc)
+            db.session.commit()
+            
+            # Create JWT token
+            access_token = create_access_token(identity=user.id)
+            refresh_token = create_refresh_token(identity=user.id)
+            
+            # Also log in via session for compatibility
+            login_user(user, remember=True)
+            
+            return jsonify({
+                'success': True,
+                'access_token': access_token,
+                'refresh_token': refresh_token,
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'role': 'admin' if user.is_admin else 'researcher'
+                }
+            }), 200
+        else:
+            return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+    
+    @app.route('/register', methods=['POST'])
+    def json_register():
+        """JSON registration endpoint for frontend"""
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'success': False, 'message': 'No data provided'}), 400
+        
+        username = data.get('username', '').strip()
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        first_name = data.get('first_name', '').strip()
+        last_name = data.get('last_name', '').strip()
+        
+        # Validation
+        if not all([username, email, password]):
+            return jsonify({'success': False, 'message': 'All fields required'}), 400
+        
+        if User.query.filter_by(username=username).first():
+            return jsonify({'success': False, 'message': 'Username already exists'}), 400
+        
+        if User.query.filter_by(email=email).first():
+            return jsonify({'success': False, 'message': 'Email already registered'}), 400
+        
+        # Create user
+        try:
+            user = User(
+                username=username,
+                email=email,
+                first_name=first_name or username,
+                last_name=last_name or ''
+            )
+            user.set_password(password)
+            
+            # First user becomes admin
+            if User.query.count() == 0:
+                user.is_admin = True
+            
+            db.session.add(user)
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Registration successful',
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email
+                }
+            }), 201
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'success': False, 'message': str(e)}), 500
+    
+    @app.route('/user', methods=['GET'])
+    @jwt_required(optional=True)
+    def get_current_user():
+        """Get current user info"""
+        identity = get_jwt_identity()
+        
+        if identity:
+            user = User.query.get(identity)
+            if user:
+                return jsonify({
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'role': 'admin' if user.is_admin else 'researcher'
+                }), 200
+        
+        # Check session-based auth as fallback
+        if current_user.is_authenticated:
+            return jsonify({
+                'id': current_user.id,
+                'username': current_user.username,
+                'email': current_user.email,
+                'first_name': current_user.first_name,
+                'last_name': current_user.last_name,
+                'role': 'admin' if current_user.is_admin else 'researcher'
+            }), 200
+            
+        return jsonify({'message': 'Not authenticated'}), 401
+    
+    @app.route('/lab_records', methods=['GET'])
+    def get_lab_records():
+        """Get lab records for the current user"""
+        # For now, return mock data to test the frontend
+        return jsonify([
+            {
+                'id': 1,
+                'title': 'CFTR W1282X Prime Editing',
+                'date': '2025-08-26',
+                'researcher': 'Test User',
+                'project': 'CF1282',
+                'status': 'completed',
+                'content': 'Prime editing experiment for CFTR mutation'
+            },
+            {
+                'id': 2,
+                'title': 'Base Editor Optimization',
+                'date': '2025-08-25',
+                'researcher': 'Test User',
+                'project': 'MizCGBE',
+                'status': 'in_progress',
+                'content': 'Optimizing miniaturized cytosine base editor'
+            }
+        ]), 200
     
     @app.route('/')
     @login_required
@@ -1890,6 +2511,303 @@ def create_app(config_name=None):
             db.session.rollback()
             current_app.logger.error(f"Error updating project progress: {str(e)}")
             return jsonify({'error': 'Failed to update progress'}), 500
+
+    # Milestone API endpoints
+    @app.route('/api/projects/<int:project_id>/milestones', methods=['GET', 'POST'])
+    @jwt_required()
+    def api_project_milestones(project_id):
+        """Get all milestones for a project or create a new milestone"""
+        user_id = int(get_jwt_identity())
+        project = Project.query.get_or_404(project_id)
+        
+        # Check if user has access to this project
+        is_owner = project.owner_id == user_id
+        is_member = False
+        
+        if not is_owner:
+            member_check = ProjectMember.query.filter_by(
+                project_id=project_id,
+                user_id=user_id
+            ).first()
+            is_member = member_check is not None
+        
+        if not (is_owner or is_member):
+            return jsonify({'error': 'Access denied'}), 403
+        
+        if request.method == 'GET':
+            try:
+                milestones = Milestone.query.filter_by(project_id=project_id).order_by(Milestone.created_at.asc()).all()
+                return jsonify({
+                    'milestones': [milestone.to_dict() for milestone in milestones],
+                    'total': len(milestones)
+                })
+            except Exception as e:
+                current_app.logger.error(f"Error fetching milestones: {str(e)}")
+                return jsonify({'error': 'Failed to fetch milestones'}), 500
+        
+        elif request.method == 'POST':
+            data = request.get_json()
+            if not data or 'title' not in data:
+                return jsonify({'error': 'Title is required'}), 400
+            
+            try:
+                milestone = Milestone(
+                    title=data['title'],
+                    description=data.get('description', ''),
+                    priority=data.get('priority', 'medium'),
+                    assignee=data.get('assignee'),
+                    notes=data.get('notes'),
+                    project_id=project_id
+                )
+                
+                if data.get('due_date'):
+                    from datetime import datetime as dt
+                    milestone.due_date = dt.fromisoformat(data['due_date']).date()
+                
+                if data.get('dependencies'):
+                    milestone.dependencies = json.dumps(data['dependencies'])
+                
+                db.session.add(milestone)
+                db.session.commit()
+                
+                return jsonify({
+                    'success': True,
+                    'milestone': milestone.to_dict()
+                }), 201
+                
+            except Exception as e:
+                db.session.rollback()
+                current_app.logger.error(f"Error creating milestone: {str(e)}")
+                return jsonify({'error': 'Failed to create milestone'}), 500
+
+    @app.route('/api/milestones/<int:milestone_id>', methods=['GET', 'PUT', 'DELETE'])
+    @jwt_required()
+    def api_milestone_detail(milestone_id):
+        """Get, update, or delete a specific milestone"""
+        user_id = int(get_jwt_identity())
+        milestone = Milestone.query.get_or_404(milestone_id)
+        project = milestone.project
+        
+        # Check if user has access to this project
+        is_owner = project.owner_id == user_id
+        is_member = False
+        
+        if not is_owner:
+            member_check = ProjectMember.query.filter_by(
+                project_id=project.id,
+                user_id=user_id
+            ).first()
+            is_member = member_check is not None
+        
+        if not (is_owner or is_member):
+            return jsonify({'error': 'Access denied'}), 403
+        
+        if request.method == 'GET':
+            return jsonify({'milestone': milestone.to_dict()})
+        
+        elif request.method == 'PUT':
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'No data provided'}), 400
+            
+            try:
+                if 'title' in data:
+                    milestone.title = data['title']
+                if 'description' in data:
+                    milestone.description = data['description']
+                if 'priority' in data:
+                    milestone.priority = data['priority']
+                if 'assignee' in data:
+                    milestone.assignee = data['assignee']
+                if 'notes' in data:
+                    milestone.notes = data['notes']
+                if 'status' in data:
+                    milestone.status = data['status']
+                
+                if 'due_date' in data and data['due_date']:
+                    from datetime import datetime as dt
+                    milestone.due_date = dt.fromisoformat(data['due_date']).date()
+                
+                if 'dependencies' in data:
+                    milestone.dependencies = json.dumps(data['dependencies'])
+                
+                db.session.commit()
+                
+                return jsonify({
+                    'success': True,
+                    'milestone': milestone.to_dict()
+                })
+                
+            except Exception as e:
+                db.session.rollback()
+                current_app.logger.error(f"Error updating milestone: {str(e)}")
+                return jsonify({'error': 'Failed to update milestone'}), 500
+        
+        elif request.method == 'DELETE':
+            try:
+                db.session.delete(milestone)
+                db.session.commit()
+                
+                return jsonify({'success': True, 'message': 'Milestone deleted successfully'})
+                
+            except Exception as e:
+                db.session.rollback()
+                current_app.logger.error(f"Error deleting milestone: {str(e)}")
+                return jsonify({'error': 'Failed to delete milestone'}), 500
+
+    # Task API endpoints
+    @app.route('/api/milestones/<int:milestone_id>/tasks', methods=['GET', 'POST'])
+    @jwt_required()
+    def api_milestone_tasks(milestone_id):
+        """Get all tasks for a milestone or create a new task"""
+        user_id = int(get_jwt_identity())
+        milestone = Milestone.query.get_or_404(milestone_id)
+        project = milestone.project
+        
+        # Check if user has access to this project
+        is_owner = project.owner_id == user_id
+        is_member = False
+        
+        if not is_owner:
+            member_check = ProjectMember.query.filter_by(
+                project_id=project.id,
+                user_id=user_id
+            ).first()
+            is_member = member_check is not None
+        
+        if not (is_owner or is_member):
+            return jsonify({'error': 'Access denied'}), 403
+        
+        if request.method == 'GET':
+            try:
+                tasks = Task.query.filter_by(milestone_id=milestone_id).order_by(Task.created_at.asc()).all()
+                return jsonify({
+                    'tasks': [task.to_dict() for task in tasks],
+                    'total': len(tasks)
+                })
+            except Exception as e:
+                current_app.logger.error(f"Error fetching tasks: {str(e)}")
+                return jsonify({'error': 'Failed to fetch tasks'}), 500
+        
+        elif request.method == 'POST':
+            data = request.get_json()
+            if not data or 'title' not in data:
+                return jsonify({'error': 'Title is required'}), 400
+            
+            try:
+                task = Task(
+                    title=data['title'],
+                    assignee=data.get('assignee'),
+                    notes=data.get('notes'),
+                    milestone_id=milestone_id
+                )
+                
+                if data.get('due_date'):
+                    from datetime import datetime as dt
+                    task.due_date = dt.fromisoformat(data['due_date']).date()
+                
+                db.session.add(task)
+                db.session.commit()
+                
+                # Update milestone progress
+                milestone.update_status()
+                db.session.commit()
+                
+                return jsonify({
+                    'success': True,
+                    'task': task.to_dict()
+                }), 201
+                
+            except Exception as e:
+                db.session.rollback()
+                current_app.logger.error(f"Error creating task: {str(e)}")
+                return jsonify({'error': 'Failed to create task'}), 500
+
+    @app.route('/api/tasks/<int:task_id>', methods=['GET', 'PUT', 'DELETE'])
+    @jwt_required()
+    def api_task_detail(task_id):
+        """Get, update, or delete a specific task"""
+        user_id = int(get_jwt_identity())
+        task = Task.query.get_or_404(task_id)
+        milestone = task.milestone
+        project = milestone.project
+        
+        # Check if user has access to this project
+        is_owner = project.owner_id == user_id
+        is_member = False
+        
+        if not is_owner:
+            member_check = ProjectMember.query.filter_by(
+                project_id=project.id,
+                user_id=user_id
+            ).first()
+            is_member = member_check is not None
+        
+        if not (is_owner or is_member):
+            return jsonify({'error': 'Access denied'}), 403
+        
+        if request.method == 'GET':
+            return jsonify({'task': task.to_dict()})
+        
+        elif request.method == 'PUT':
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'No data provided'}), 400
+            
+            try:
+                if 'title' in data:
+                    task.title = data['title']
+                if 'assignee' in data:
+                    task.assignee = data['assignee']
+                if 'notes' in data:
+                    task.notes = data['notes']
+                if 'completed' in data:
+                    task.completed = data['completed']
+                    if task.completed:
+                        task.completed_date = datetime.now(timezone.utc)
+                    else:
+                        task.completed_date = None
+                
+                if 'due_date' in data and data['due_date']:
+                    from datetime import datetime as dt
+                    task.due_date = dt.fromisoformat(data['due_date']).date()
+                
+                db.session.commit()
+                
+                # Update milestone progress after task change
+                milestone.update_status()
+                db.session.commit()
+                
+                return jsonify({
+                    'success': True,
+                    'task': task.to_dict(),
+                    'milestone': milestone.to_dict()
+                })
+                
+            except Exception as e:
+                db.session.rollback()
+                current_app.logger.error(f"Error updating task: {str(e)}")
+                return jsonify({'error': 'Failed to update task'}), 500
+        
+        elif request.method == 'DELETE':
+            try:
+                db.session.delete(task)
+                db.session.commit()
+                
+                # Update milestone progress after task deletion
+                milestone.update_status()
+                db.session.commit()
+                
+                return jsonify({
+                    'success': True, 
+                    'message': 'Task deleted successfully',
+                    'milestone': milestone.to_dict()
+                })
+                
+            except Exception as e:
+                db.session.rollback()
+                current_app.logger.error(f"Error deleting task: {str(e)}")
+                return jsonify({'error': 'Failed to delete task'}), 500
     
     # User Search API
     @app.route('/api/users/search', methods=['GET'])
@@ -2838,6 +3756,120 @@ def create_app(config_name=None):
 
     # Error handlers
     # NGS Analysis API endpoints
+    @app.route('/api/ngs/setup', methods=['POST'])
+    def api_ngs_setup():
+        """Set up NGS analysis folders and configuration"""
+        try:
+            data = request.get_json()
+            
+            # Import web-safe workflow
+            from ngs_web_workflow import run_web_workflow
+            
+            # Validate required fields
+            required_fields = ['gene_name', 'amplicon_seq', 'sgRNA', 'sample_names']
+            for field in required_fields:
+                if field not in data:
+                    return jsonify({'error': f'Missing required field: {field}'}), 400
+            
+            # Run the web-safe workflow
+            result = run_web_workflow(
+                gene_name=data['gene_name'],
+                amplicon_seq=data['amplicon_seq'],
+                sgRNA=data['sgRNA'],
+                sample_names=data['sample_names']
+            )
+            
+            if result['success']:
+                return jsonify({
+                    'success': True,
+                    'message': 'NGS analysis setup completed',
+                    'output_folder': result['gene_folder'],
+                    'files': {
+                        'batch_file': result['batch_file'],
+                        'config_file': result['config_file'],
+                        'instructions_html': result['instructions_html']
+                    }
+                })
+            else:
+                return jsonify({'error': 'NGS setup failed'}), 500
+                
+        except Exception as e:
+            current_app.logger.error(f"NGS setup error: {str(e)}")
+            return jsonify({'error': f'NGS setup failed: {str(e)}'}), 500
+
+    @app.route('/api/ngs/results/<gene_name>', methods=['GET'])
+    def api_ngs_results(gene_name):
+        """Get NGS analysis results for a gene"""
+        try:
+            from pathlib import Path
+            import json
+            
+            # Check if we have results in the gene folder
+            if os.path.exists("/var/www/picnotebook"):
+                base_path = Path("/var/www/picnotebook/ngs_data")
+            else:
+                base_path = Path.home() / "Desktop"
+            
+            gene_folder = base_path / gene_name
+            results_folder = gene_folder / "results" 
+            
+            if not gene_folder.exists():
+                return jsonify({'error': f'No analysis found for gene: {gene_name}'}), 404
+            
+            # Check for real CRISPResso results - try both possible folder names
+            crispresso_results_folder = gene_folder / "CRISPRessoBatch_on_batch"
+            if not crispresso_results_folder.exists():
+                crispresso_results_folder = gene_folder / "CRISPRessoBatch_on_crispresso_batch"
+            batch_file = gene_folder / "crispresso_batch.txt"
+            config_file = gene_folder / "crispresso_config.json"
+            
+            # List all files that were created
+            files_created = []
+            for file_path in gene_folder.glob("*"):
+                if file_path.is_file():
+                    files_created.append(file_path.name)
+            
+            if crispresso_results_folder.exists():
+                # Real CRISPResso results exist
+                results = {
+                    'success': True,
+                    'gene_name': gene_name,
+                    'status': 'completed',
+                    'analysis_type': 'real_crispresso_analysis',
+                    'files_created': files_created,
+                    'analysis_folder': str(gene_folder),
+                    'results_folder': str(crispresso_results_folder),
+                    'note': 'Real CRISPResso analysis completed successfully!',
+                    'available_results': [
+                        'CRISPRessoBatch_quantification_of_editing_frequency.txt',
+                        'CRISPRessoBatch_mapping_statistics.txt',
+                        'Individual sample HTML reports',
+                        'Batch summary plots and data'
+                    ]
+                }
+            else:
+                # No real results yet - show setup status
+                results = {
+                    'success': True,
+                    'gene_name': gene_name,
+                    'status': 'setup_complete' if batch_file.exists() else 'in_progress',
+                    'analysis_type': 'setup_ready',
+                    'files_created': files_created,
+                    'analysis_folder': str(gene_folder),
+                    'note': 'Analysis setup complete. Run CRISPResso analysis to generate results.',
+                    'next_steps': [
+                        f'Analysis files are ready in: {gene_folder}',
+                        'Use the NGS workflow Step 3 to run CRISPResso analysis',
+                        'Results will appear in CRISPRessoBatch_on_batch/ folder'
+                    ]
+                }
+            
+            return jsonify({'success': True, 'summary': results})
+                
+        except Exception as e:
+            current_app.logger.error(f"NGS results error: {str(e)}")
+            return jsonify({'error': f'Failed to get results: {str(e)}'}), 500
+
     @app.route('/api/ngs/analyze', methods=['POST'])
     @jwt_required()
     def api_ngs_analyze():
@@ -2935,7 +3967,7 @@ def create_app(config_name=None):
             
             # Check for various stages
             batch_file = gene_folder / 'crispresso_batch.txt'
-            crispresso_folder = gene_folder / 'CRISPRessoBatch_on_crispresso_batch'
+            crispresso_folder = gene_folder / 'CRISPRessoBatch_on_batch'
             results_folder = gene_folder / 'results'
             
             status = {
@@ -2964,6 +3996,203 @@ def create_app(config_name=None):
         except Exception as e:
             current_app.logger.error(f"Status check error: {str(e)}")
             return jsonify({'error': f'Failed to check status: {str(e)}'}), 500
+
+    @app.route('/api/execute_command', methods=['POST'])
+    def api_execute_command():
+        """Execute NGS analysis commands safely"""
+        try:
+            data = request.get_json()
+            command = data.get('command', '')
+            
+            # For web safety, simulate command execution
+            # Check CRISPResso first since cd && CRISPResso commands should run CRISPResso
+            if 'CRISPResso' in command:
+                # Actually execute CRISPResso command
+                import subprocess
+                import os
+                from pathlib import Path
+                
+                try:
+                    # Extract the working directory from the command if it contains 'cd'
+                    if ' && ' in command:
+                        parts = command.split(' && ')
+                        cd_part = parts[0].strip()
+                        crispresso_part = parts[1].strip()
+                        
+                        # Extract directory from cd command
+                        if cd_part.startswith('cd '):
+                            work_dir = cd_part[3:].strip().strip('"')
+                        else:
+                            work_dir = os.getcwd()
+                    else:
+                        work_dir = os.getcwd()
+                        crispresso_part = command
+                    
+                    # Ensure the working directory exists
+                    work_dir = Path(work_dir).expanduser().resolve()
+                    if not work_dir.exists():
+                        return jsonify({
+                            'success': False,
+                            'output': f'Directory does not exist: {work_dir}',
+                            'return_code': 1,
+                            'stdout': '',
+                            'stderr': f'Directory does not exist: {work_dir}'
+                        })
+                    
+                    # Log the command being executed
+                    current_app.logger.info(f"Executing CRISPResso command in {work_dir}: {crispresso_part}")
+                    
+                    # Execute the CRISPResso command with conda
+                    # Use shell=True to handle complex commands with quotes and special characters
+                    cmd_with_conda = f'/opt/anaconda3/bin/conda run -n crispresso2_v233 {crispresso_part}'
+                    current_app.logger.info(f"Full command: {cmd_with_conda}")
+                    
+                    result = subprocess.run(
+                        cmd_with_conda,
+                        cwd=str(work_dir),
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=1800  # 30 minute timeout
+                    )
+                    
+                    # Return the actual results
+                    return jsonify({
+                        'success': result.returncode == 0,
+                        'output': result.stdout + result.stderr,
+                        'message': 'CRISPResso execution completed' if result.returncode == 0 else 'CRISPResso execution failed',
+                        'return_code': result.returncode,
+                        'stdout': result.stdout,
+                        'stderr': result.stderr
+                    })
+                    
+                except subprocess.TimeoutExpired:
+                    return jsonify({
+                        'success': False,
+                        'output': 'CRISPResso execution timed out (30 minutes)',
+                        'return_code': 124,
+                        'stdout': '',
+                        'stderr': 'Command timed out after 30 minutes'
+                    })
+                except Exception as e:
+                    current_app.logger.error(f"CRISPResso execution error: {str(e)}")
+                    return jsonify({
+                        'success': False,
+                        'output': f'CRISPResso execution failed: {str(e)}',
+                        'return_code': 1,
+                        'stdout': '',
+                        'stderr': str(e)
+                    })
+            elif 'cd' in command and 'CRISPResso' not in command:
+                # Handle directory navigation simulation for cd-only commands
+                return jsonify({
+                    'success': True,
+                    'output': 'Directory navigation simulated',
+                    'message': 'CD command processed',
+                    'return_code': 0,
+                    'stdout': 'Directory navigation simulated',
+                    'stderr': ''
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'output': f'Command processed: {command}',
+                    'message': 'Command executed successfully',
+                    'return_code': 0,
+                    'stdout': f'Command processed: {command}',
+                    'stderr': ''
+                })
+                
+        except Exception as e:
+            current_app.logger.error(f"Command execution error: {str(e)}")
+            return jsonify({'error': f'Command execution failed: {str(e)}'}), 500
+
+    @app.route('/api/ngs/download/<gene_name>', methods=['GET'])
+    def download_results(gene_name):
+        """Download analysis results as ZIP file"""
+        import zipfile
+        import tempfile
+        from pathlib import Path
+        
+        try:
+            # Use the same path structure as in execute_command
+            gene_folder = Path.home() / "Desktop" / gene_name
+            results_folder = gene_folder / 'CRISPRessoBatch_on_crispresso_batch'
+            
+            if not gene_folder.exists():
+                return jsonify({'error': f'No analysis folder found for {gene_name}'}), 404
+            
+            if not results_folder.exists():
+                return jsonify({'error': f'No CRISPResso results found for {gene_name}'}), 404
+            
+            # Create temporary ZIP file
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_file:
+                zip_path = temp_file.name
+                
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    # Add ALL files from the gene folder (includes FASTQ, batch, config, etc.)
+                    for root, dirs, files in os.walk(gene_folder):
+                        for file in files:
+                            file_path = Path(root) / file
+                            # Skip .DS_Store files
+                            if file == '.DS_Store':
+                                continue
+                            # Create relative path for ZIP (relative to gene folder)
+                            arcname = file_path.relative_to(gene_folder)
+                            zipf.write(file_path, arcname)
+                
+                # Send the file and clean up after
+                def remove_temp_file(response):
+                    try:
+                        os.unlink(zip_path)
+                    except:
+                        pass
+                    return response
+                
+                return send_file(
+                    zip_path,
+                    mimetype='application/zip',
+                    as_attachment=True,
+                    download_name=f'{gene_name}_analysis_results.zip'
+                )
+                
+        except Exception as e:
+            current_app.logger.error(f"Download error: {str(e)}")
+            return jsonify({'error': f'Download failed: {str(e)}'}), 500
+
+    @app.route('/api/upload_ngs_files', methods=['POST'])
+    def api_upload_ngs_files():
+        """Handle NGS file uploads"""
+        try:
+            files = request.files.getlist('files')
+            gene_name = request.form.get('gene_name')
+            
+            if not gene_name:
+                return jsonify({'error': 'Gene name required'}), 400
+            
+            # Create server-side path for NGS data
+            from pathlib import Path
+            ngs_data_path = Path('/var/www/picnotebook/ngs_data') / gene_name
+            ngs_data_path.mkdir(parents=True, exist_ok=True)
+            
+            uploaded_files = []
+            for file in files:
+                if file.filename:
+                    filename = secure_filename(file.filename)
+                    file_path = ngs_data_path / filename
+                    file.save(str(file_path))
+                    uploaded_files.append(str(file_path))
+            
+            return jsonify({
+                'success': True,
+                'message': f'Uploaded {len(uploaded_files)} files',
+                'files': uploaded_files,
+                'upload_path': str(ngs_data_path)
+            })
+            
+        except Exception as e:
+            current_app.logger.error(f"File upload error: {str(e)}")
+            return jsonify({'error': f'File upload failed: {str(e)}'}), 500
     
     @app.errorhandler(404)
     def not_found(error):

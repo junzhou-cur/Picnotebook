@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}{{ project.name }} - Lab Notebook Processor{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>📁 {{ project.name }}</h1>
+            <div>
+                <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">
+                    ← Back to Dashboard
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Project Information -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5>📋 Project Information</h5>
+            </div>
+            <div class="card-body">
+                {% if project.description %}
+                    <div class="mb-3">
+                        <h6>Description</h6>
+                        <p class="text-muted">{{ project.description }}</p>
+                    </div>
+                {% endif %}
+                
+                {% if project.hypothesis %}
+                    <div class="mb-3">
+                        <h6>Hypothesis</h6>
+                        <p class="text-muted">{{ project.hypothesis }}</p>
+                    </div>
+                {% endif %}
+                
+                {% if project.purpose %}
+                    <div class="mb-3">
+                        <h6>Purpose</h6>
+                        <p class="text-muted">{{ project.purpose }}</p>
+                    </div>
+                {% endif %}
+                
+                {% if project.current_progress %}
+                    <div class="mb-0">
+                        <h6>Current Progress</h6>
+                        <div class="bg-light p-3 rounded">
+                            <pre style="white-space: pre-wrap; margin: 0; font-family: inherit;">{{ project.current_progress }}</pre>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h6>📊 Project Stats</h6>
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless">
+                    <tr>
+                        <td><strong>Status:</strong></td>
+                        <td>
+                            <span class="badge bg-{{ 'success' if project.status == 'active' else 'secondary' }}">
+                                {{ project.status|title }}
+                            </span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong>Created:</strong></td>
+                        <td>{{ project.created_at.strftime('%m/%d/%Y') if project.created_at else 'Unknown' }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Updated:</strong></td>
+                        <td>{{ project.updated_at.strftime('%m/%d/%Y') if project.updated_at else 'Unknown' }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Lab Notes:</strong></td>
+                        <td>{{ lab_notes|length }}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Lab Notes -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5>📝 Lab Notes ({{ lab_notes|length }})</h5>
+            </div>
+            <div class="card-body">
+                {% if lab_notes %}
+                    <div class="accordion" id="notesAccordion">
+                        {% for note in lab_notes %}
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="heading{{ loop.index }}">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                                        data-bs-target="#collapse{{ loop.index }}" aria-expanded="false">
+                                    <div class="d-flex justify-content-between w-100 me-3">
+                                        <div>
+                                            <strong>{{ note.title }}</strong>
+                                            {% if note.auto_classified %}
+                                                <span class="badge bg-info ms-2">Auto-classified</span>
+                                            {% endif %}
+                                            <span class="badge bg-{{ 'success' if note.processing_status == 'completed' else 'warning' }} ms-2">
+                                                {{ note.processing_status|title }}
+                                            </span>
+                                        </div>
+                                        <small class="text-muted">
+                                            {{ note.created_at.strftime('%m/%d/%Y %H:%M') if note.created_at else '' }}
+                                        </small>
+                                    </div>
+                                </button>
+                            </h2>
+                            <div id="collapse{{ loop.index }}" class="accordion-collapse collapse" 
+                                 data-bs-parent="#notesAccordion">
+                                <div class="accordion-body">
+                                    <div class="markdown-content">
+                                        {{ note.content | replace('\n', '<br>') | safe }}
+                                    </div>
+                                    <hr>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <small class="text-muted">
+                                                Author: {{ note.author.get_full_name() if note.author else 'Unknown' }}
+                                                {% if note.original_image_path %}
+                                                | <a href="#" class="text-decoration-none">📷 Original Image</a>
+                                                {% endif %}
+                                            </small>
+                                        </div>
+                                        <button class="btn btn-sm btn-outline-primary" onclick="copyNoteToClipboard('{{ loop.index }}')">
+                                            📋 Copy
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="text-center py-4">
+                        <p class="text-muted">No lab notes yet for this project.</p>
+                        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Add First Note</a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyNoteToClipboard(noteIndex) {
+    const noteContent = document.querySelector(`#collapse${noteIndex} .markdown-content`).innerText;
+    navigator.clipboard.writeText(noteContent).then(function() {
+        // Show feedback
+        const btn = event.target;
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '✅ Copied!';
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-success');
+        
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.classList.remove('btn-success');
+            btn.classList.add('btn-outline-primary');
+        }, 2000);
+    }).catch(function(err) {
+        console.error('Could not copy text: ', err);
+        alert('Failed to copy to clipboard');
+    });
+}
+</script>
+{% endblock %}

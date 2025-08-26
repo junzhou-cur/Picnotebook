@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1>Lab Notebook Image Processor</h1>
+        <p class="lead">Upload handwritten lab notes and convert them to structured digital entries using AI</p>
+    </div>
+</div>
+
+<!-- API Key Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5>🔑 xAI API Configuration</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('set_api_key') }}">
+                    <div class="input-group">
+                        <input type="password" class="form-control" name="api_key" placeholder="Enter your xAI API key..." {% if session.api_key %}value="••••••••••••••••"{% endif %}>
+                        <button class="btn btn-primary" type="submit">Save API Key</button>
+                    </div>
+                    <small class="form-text text-muted">Get your API key from <a href="https://x.ai/api" target="_blank">https://x.ai/api</a></small>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Image Processing Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5>📷 Process Lab Notes</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>1. Upload Image</h6>
+                        <div id="imageUpload" class="border border-dashed rounded p-3 text-center mb-3" style="border-color: #dee2e6;">
+                            <input type="file" id="imageInput" accept="image/*" style="display: none;">
+                            <div id="uploadContent">
+                                <i class="fas fa-upload fa-2x text-muted mb-2"></i>
+                                <p class="text-muted">Click to upload an image of your handwritten notes</p>
+                                <button type="button" class="btn btn-outline-primary" onclick="document.getElementById('imageInput').click()">
+                                    Choose Image
+                                </button>
+                            </div>
+                            <div id="imagePreview" style="display: none;">
+                                <img id="previewImg" src="" alt="Preview" style="max-width: 100%; max-height: 200px;">
+                                <p id="fileName" class="mt-2 mb-0"></p>
+                            </div>
+                        </div>
+                        
+                        <button id="processBtn" class="btn btn-success" disabled>
+                            <span id="processSpinner" class="spinner-border spinner-border-sm" style="display: none;"></span>
+                            2. Process with AI
+                        </button>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <h6>3. Processed Text</h6>
+                        <textarea id="processedText" class="form-control" rows="8" placeholder="Processed text will appear here..." readonly></textarea>
+                        <button id="saveBtn" class="btn btn-primary mt-2" style="display: none;">Save to Project</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Projects Section -->
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h3>📁 Your Projects</h3>
+            <a href="{{ url_for('create_project') }}" class="btn btn-success">Create New Project</a>
+        </div>
+        
+        {% if projects %}
+            <div class="row">
+                {% for project in projects %}
+                <div class="col-md-6 col-lg-4 mb-3">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <h5 class="card-title">{{ project.name }}</h5>
+                            {% if project.info.purpose %}
+                                <p class="card-text">{{ project.info.purpose[:100] }}{% if project.info.purpose|length > 100 %}...{% endif %}</p>
+                            {% endif %}
+                            <div class="d-flex justify-content-between text-muted small">
+                                <span>{{ project.note_count }} notes</span>
+                                {% if project.info.created_date %}
+                                    <span>{{ project.info.created_date }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <div class="btn-group w-100">
+                                <a href="{{ url_for('view_project', project_name=project.name) }}" class="btn btn-outline-primary btn-sm">View</a>
+                                <a href="{{ url_for('generate_report', project_name=project.name) }}" class="btn btn-outline-success btn-sm">Report</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="text-center py-5">
+                <p class="text-muted">No projects yet. Create your first project to get started!</p>
+                <a href="{{ url_for('create_project') }}" class="btn btn-primary">Create Project</a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Manual Save Modal -->
+<div class="modal fade" id="manualSaveModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Select Project</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="manualSaveForm">
+                    <div class="mb-3">
+                        <label for="projectSelect" class="form-label">Choose a project:</label>
+                        <select class="form-select" id="projectSelect" name="project_name" required>
+                            <option value="">Select a project...</option>
+                            {% for project in projects %}
+                                <option value="{{ project.name }}">{{ project.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveToProject()">Save Note</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Image upload handling
+document.getElementById('imageInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (file) {
+        uploadImage(file);
+    }
+});
+
+// Drag and drop for image upload
+const uploadArea = document.getElementById('imageUpload');
+uploadArea.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    uploadArea.classList.add('border-primary');
+});
+
+uploadArea.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    uploadArea.classList.remove('border-primary');
+});
+
+uploadArea.addEventListener('drop', function(e) {
+    e.preventDefault();
+    uploadArea.classList.remove('border-primary');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) {
+        uploadImage(file);
+    }
+});
+
+function uploadImage(file) {
+    const formData = new FormData();
+    formData.append('image', file);
+    
+    // Show preview
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        document.getElementById('previewImg').src = e.target.result;
+        document.getElementById('fileName').textContent = file.name;
+        document.getElementById('uploadContent').style.display = 'none';
+        document.getElementById('imagePreview').style.display = 'block';
+        document.getElementById('processBtn').disabled = false;
+    };
+    reader.readAsDataURL(file);
+    
+    // Upload to server
+    fetch('/upload_image', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            alert('Upload failed: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Upload failed');
+    });
+}
+
+// Process image
+document.getElementById('processBtn').addEventListener('click', function() {
+    const btn = this;
+    const spinner = document.getElementById('processSpinner');
+    
+    btn.disabled = true;
+    spinner.style.display = 'inline-block';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Processing...';
+    
+    fetch('/process_image', {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('processedText').value = data.text;
+            document.getElementById('saveBtn').style.display = 'block';
+        } else {
+            alert('Processing failed: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Processing failed');
+    })
+    .finally(() => {
+        btn.disabled = false;
+        spinner.style.display = 'none';
+        btn.innerHTML = '2. Process with AI';
+    });
+});
+
+// Save note
+document.getElementById('saveBtn').addEventListener('click', function() {
+    fetch('/save_note', {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Note saved to project "${data.project}"!`);
+            location.reload();
+        } else if (data.projects) {
+            // Show manual selection modal
+            new bootstrap.Modal(document.getElementById('manualSaveModal')).show();
+        } else {
+            alert('Save failed: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Save failed');
+    });
+});
+
+function saveToProject() {
+    const projectName = document.getElementById('projectSelect').value;
+    if (!projectName) {
+        alert('Please select a project');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('project_name', projectName);
+    
+    fetch('/save_note_manual', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Note saved to project "${data.project}"!`);
+            bootstrap.Modal.getInstance(document.getElementById('manualSaveModal')).hide();
+            location.reload();
+        } else {
+            alert('Save failed: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Save failed');
+    });
+}
+</script>
+{% endblock %}
