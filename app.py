@@ -13,8 +13,9 @@ from celery_app import make_celery
 from config import config
 from models import db, User, Project, LabNote, ProcessingJob, ProjectMember, Protocol, Sequence, Amplicon, Milestone, Task
 from tasks import process_image_async, generate_project_report_async
-from enhanced_ocr import EnhancedOCR, extract_text_from_image, process_lab_note_image  # Enhanced OCR integration
-from lab_note_parser import LabNoteParser, process_lab_note_text  # Lab note parsing
+# OCR temporarily disabled for production deployment
+# from enhanced_ocr import EnhancedOCR, extract_text_from_image, process_lab_note_image
+# from lab_note_parser import LabNoteParser, process_lab_note_text
 import json
 import pandas as pd
 from openpyxl import Workbook
