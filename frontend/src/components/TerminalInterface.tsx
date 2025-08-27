@@ -47,7 +47,7 @@ const TerminalInterface: React.FC = () => {
     if (typeof window !== 'undefined' && (window.location.hostname === 'picnotebook.com' || window.location.hostname === 'www.picnotebook.com')) {
       return 'https://picnotebook.com';
     }
-    return 'http://localhost:5005';
+    return process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005';
   };
 
   const fetchWorkingDirectory = async () => {

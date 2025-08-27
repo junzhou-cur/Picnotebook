@@ -1,0 +1,28 @@
+{
+  "name": "PicNotebook Local Development Configuration",
+  "description": "Centralized port and URL configuration for local development",
+  "ports": {
+    "frontend": 3002,
+    "api": 5005,
+    "auth": 5005,
+    "core": 5005,
+    "chart": 5005,
+    "legacy": 5005
+  },
+  "urls": {
+    "frontend": "http://localhost:3002",
+    "api": "http://localhost:5005",
+    "auth": "http://localhost:5005",
+    "core": "http://localhost:5005",
+    "chart": "http://localhost:5005",
+    "legacy": "http://localhost:5005"
+  },
+  "endpoints": {
+    "auth": {
+      "login": "/auth/api/login",
+      "register": "/auth/api/register",
+      "logout": "/auth/logout"
+    },
+    "health": "/health"
+  }
+}

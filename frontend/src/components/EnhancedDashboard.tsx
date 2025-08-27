@@ -80,7 +80,7 @@ export function EnhancedDashboard() {
     const fetchDashboardData = async () => {
       try {
         // Fetch notes count
-        const notesResponse = await fetch('http://localhost:5005/lab_records');
+        const notesResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/lab_records`);
         if (notesResponse.ok) {
           const notes = await notesResponse.json();
           setDashboardStats(prev => ({
@@ -90,7 +90,7 @@ export function EnhancedDashboard() {
         }
 
         // Fetch tables count
-        const tablesResponse = await fetch('http://localhost:5005/detected_tables');
+        const tablesResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/detected_tables`);
         if (tablesResponse.ok) {
           const tables = await tablesResponse.json();
           setDashboardStats(prev => ({
@@ -100,7 +100,7 @@ export function EnhancedDashboard() {
         }
 
         // Fetch charts count
-        const chartsResponse = await fetch('http://localhost:5005/generated_charts');
+        const chartsResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/generated_charts`);
         if (chartsResponse.ok) {
           const charts = await chartsResponse.json();
           setDashboardStats(prev => ({

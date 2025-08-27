@@ -60,7 +60,7 @@ export function NGSAnalysisModal({ isOpen, onClose }: NGSAnalysisModalProps) {
   const fetchSavedSequences = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5003/api/sequences', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/api/sequences`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -102,7 +102,7 @@ export function NGSAnalysisModal({ isOpen, onClose }: NGSAnalysisModalProps) {
     }
 
     try {
-      const response = await fetch('http://localhost:5005/save_ngs_sequence', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/save_ngs_sequence`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -155,7 +155,7 @@ export function NGSAnalysisModal({ isOpen, onClose }: NGSAnalysisModalProps) {
       setAnalysisProgress(20);
       setAnalysisLog(prev => [...prev, 'Creating analysis files...']);
       
-      const analysisResponse = await fetch('http://localhost:5003/api/ngs/analyze', {
+      const analysisResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/api/ngs/analyze`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -182,7 +182,7 @@ export function NGSAnalysisModal({ isOpen, onClose }: NGSAnalysisModalProps) {
         setAnalysisProgress(60);
         setAnalysisLog(prev => [...prev, 'Running CRISPResso analysis...']);
         
-        const crispressoResponse = await fetch('http://localhost:5003/api/ngs/run_crispresso', {
+        const crispressoResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/api/ngs/run_crispresso`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

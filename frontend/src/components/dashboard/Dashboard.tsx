@@ -32,7 +32,7 @@ export const Dashboard: React.FC = () => {
     }
 
     // Trigger MiSeq/FastQ analysis
-    fetch('http://localhost:5003/api/toolbox/miseq', {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/api/toolbox/miseq`, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
@@ -64,7 +64,7 @@ export const Dashboard: React.FC = () => {
   const handleProjectDelete = (projectId: string) => {
     if (confirm('Are you sure you want to delete this project? This action cannot be undone.')) {
       // Call delete API
-      fetch(`http://localhost:5003/api/projects/${projectId}`, {
+      fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/api/projects/${projectId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' }
       }).then(response => {
@@ -88,7 +88,7 @@ export const Dashboard: React.FC = () => {
   const handleAddCollaborator = (projectId: string) => {
     const email = prompt('Enter collaborator email:');
     if (email) {
-      fetch(`http://localhost:5003/api/projects/${projectId}/collaborators`, {
+      fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/api/projects/${projectId}/collaborators`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })

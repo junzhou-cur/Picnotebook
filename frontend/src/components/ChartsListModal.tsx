@@ -60,7 +60,7 @@ export function ChartsListModal({ isOpen, onClose, onChartSelect }: ChartsListMo
   const fetchCharts = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:5005/generated_charts');
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/generated_charts`);
       if (response.ok) {
         const data = await response.json();
         console.log('Fetched charts:', data);

@@ -48,7 +48,7 @@ export function TablesListModal({ isOpen, onClose, onTableSelect }: TablesListMo
   const fetchTables = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:5005/detected_tables');
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/detected_tables`);
       if (response.ok) {
         const data = await response.json();
         console.log('Fetched tables:', data);

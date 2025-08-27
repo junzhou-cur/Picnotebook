@@ -46,7 +46,7 @@ export function NotesListModal({ isOpen, onClose, onNoteSelect }: NotesListModal
     setLoading(true);
     try {
       // Fetch from actual API endpoint
-      const response = await fetch('http://localhost:5005/lab_records');
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/lab_records`);
       if (response.ok) {
         const data = await response.json();
         console.log('Fetched notes:', data);

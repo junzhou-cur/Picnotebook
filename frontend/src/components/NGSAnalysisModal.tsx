@@ -61,7 +61,7 @@ export function NGSAnalysisModal({ isOpen, onClose }: NGSAnalysisModalProps) {
   const fetchSavedSequences = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5003/api/sequences', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/api/sequences`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -111,7 +111,7 @@ export function NGSAnalysisModal({ isOpen, onClose }: NGSAnalysisModalProps) {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5003/api/sequences', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/api/sequences`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -179,7 +179,7 @@ export function NGSAnalysisModal({ isOpen, onClose }: NGSAnalysisModalProps) {
       setAnalysisProgress(20);
       setAnalysisLog(prev => [...prev, 'Creating analysis files...']);
       
-      const analysisResponse = await fetch('http://localhost:5003/api/ngs/analyze', {
+      const analysisResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005'}/api/ngs/analyze`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

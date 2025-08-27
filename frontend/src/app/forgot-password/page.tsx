@@ -26,7 +26,7 @@ export default function ForgotPasswordPage() {
     try {
       const BASE_URL = typeof window !== 'undefined' && (window.location.hostname === 'picnotebook.com' || window.location.hostname === 'www.picnotebook.com')
         ? 'http://picnotebook.com/api' 
-        : 'http://localhost:5003';
+        : process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005';
       const response = await fetch(`${BASE_URL}/auth/api/forgot-password`, {
         method: 'POST',
         headers: {
