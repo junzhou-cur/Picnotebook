@@ -1,0 +1,289 @@
+'use client';
+
+import React, { useState, useEffect, useRef } from 'react';
+import { Terminal, Command, Play, Folder, Clock, AlertTriangle } from 'lucide-react';
+
+interface CommandHistory {
+  command: string;
+  output: string;
+  error?: string;
+  timestamp: string;
+  executionTime?: number;
+  returnCode?: number;
+}
+
+interface DirectoryInfo {
+  current_directory: string;
+  contents: Array<{
+    name: string;
+    type: 'file' | 'directory';
+    size?: number;
+  }>;
+  allowed_commands: string[];
+}
+
+const TerminalInterface: React.FC = () => {
+  const [command, setCommand] = useState('');
+  const [history, setHistory] = useState<CommandHistory[]>([]);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [workingDir, setWorkingDir] = useState<DirectoryInfo | null>(null);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
+
+  // Load working directory info on mount
+  useEffect(() => {
+    fetchWorkingDirectory();
+  }, []);
+
+  // Auto-scroll to bottom when new output is added
+  useEffect(() => {
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [history]);
+
+  const getApiBaseUrl = () => {
+    if (typeof window !== 'undefined' && (window.location.hostname === 'picnotebook.com' || window.location.hostname === 'www.picnotebook.com')) {
+      return 'https://picnotebook.com';
+    }
+    return process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005';
+  };
+
+  const fetchWorkingDirectory = async () => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/get_working_directory`);
+      if (response.ok) {
+        const data = await response.json();
+        setWorkingDir(data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch working directory:', error);
+    }
+  };
+
+  const executeCommand = async () => {
+    if (!command.trim() || isExecuting) return;
+
+    setIsExecuting(true);
+    const currentCommand = command.trim();
+    setCommand('');
+
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/execute_command`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          command: currentCommand,
+          working_dir: workingDir?.current_directory
+        })
+      });
+
+      const result = await response.json();
+
+      const historyEntry: CommandHistory = {
+        command: currentCommand,
+        output: result.stdout || '',
+        error: result.stderr || result.error,
+        timestamp: result.timestamp || new Date().toISOString(),
+        executionTime: result.execution_time,
+        returnCode: result.return_code
+      };
+
+      setHistory(prev => [...prev, historyEntry]);
+
+      // Update working directory if command might have changed it
+      if (currentCommand.startsWith('cd ') || currentCommand === 'pwd') {
+        await fetchWorkingDirectory();
+      }
+
+    } catch (error) {
+      const errorEntry: CommandHistory = {
+        command: currentCommand,
+        output: '',
+        error: `Network error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        timestamp: new Date().toISOString()
+      };
+      setHistory(prev => [...prev, errorEntry]);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      executeCommand();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (historyIndex < history.length - 1) {
+        const newIndex = historyIndex + 1;
+        setHistoryIndex(newIndex);
+        setCommand(history[history.length - 1 - newIndex].command);
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIndex > 0) {
+        const newIndex = historyIndex - 1;
+        setHistoryIndex(newIndex);
+        setCommand(history[history.length - 1 - newIndex].command);
+      } else if (historyIndex === 0) {
+        setHistoryIndex(-1);
+        setCommand('');
+      }
+    }
+  };
+
+  const clearTerminal = () => {
+    setHistory([]);
+    setHistoryIndex(-1);
+  };
+
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes) return '';
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+  };
+
+  return (
+    <div className="bg-gray-900 text-green-400 font-mono rounded-lg overflow-hidden">
+      {/* Header */}
+      <div className="bg-gray-800 px-4 py-2 flex items-center justify-between border-b border-gray-700">
+        <div className="flex items-center space-x-2">
+          <Terminal size={16} />
+          <span className="text-sm">PicNotebook Terminal</span>
+        </div>
+        <div className="flex items-center space-x-2 text-xs">
+          <Folder size={12} />
+          <span className="text-gray-300">
+            {workingDir?.current_directory?.split('/').pop() || 'picnotebook'}
+          </span>
+          <button
+            onClick={clearTerminal}
+            className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+
+      {/* Terminal Output */}
+      <div 
+        ref={outputRef}
+        className="h-64 overflow-y-auto p-4 bg-gray-900"
+      >
+        {/* Welcome message */}
+        {history.length === 0 && (
+          <div className="text-gray-400 text-sm mb-4">
+            <p>PicNotebook Terminal Interface</p>
+            <p>Type commands to execute them on the server.</p>
+            {workingDir?.allowed_commands && (
+              <p className="mt-2">
+                Allowed commands: {workingDir.allowed_commands.slice(0, 10).join(', ')}
+                {workingDir.allowed_commands.length > 10 && '...'}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Command History */}
+        {history.map((entry, index) => (
+          <div key={index} className="mb-3">
+            {/* Command */}
+            <div className="flex items-center space-x-2 text-blue-400">
+              <span className="text-gray-500">$</span>
+              <span>{entry.command}</span>
+              {entry.executionTime && (
+                <span className="text-xs text-gray-500 flex items-center ml-auto">
+                  <Clock size={10} className="mr-1" />
+                  {entry.executionTime}s
+                </span>
+              )}
+            </div>
+            
+            {/* Output */}
+            {entry.output && (
+              <pre className="text-gray-300 text-sm mt-1 whitespace-pre-wrap">
+                {entry.output}
+              </pre>
+            )}
+            
+            {/* Error */}
+            {entry.error && (
+              <div className="text-red-400 text-sm mt-1 flex items-start space-x-1">
+                <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+                <pre className="whitespace-pre-wrap">{entry.error}</pre>
+              </div>
+            )}
+            
+            {/* Return Code */}
+            {entry.returnCode !== undefined && entry.returnCode !== 0 && (
+              <div className="text-yellow-400 text-xs mt-1">
+                Process exited with code {entry.returnCode}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Loading indicator */}
+        {isExecuting && (
+          <div className="flex items-center space-x-2 text-yellow-400">
+            <span className="text-gray-500">$</span>
+            <span>{command}</span>
+            <div className="animate-pulse">●</div>
+          </div>
+        )}
+      </div>
+
+      {/* Input Area */}
+      <div className="bg-gray-800 border-t border-gray-700 p-4">
+        <div className="flex items-center space-x-2">
+          <span className="text-gray-500">$</span>
+          <input
+            ref={inputRef}
+            type="text"
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Enter command..."
+            className="flex-1 bg-transparent outline-none text-green-400"
+            disabled={isExecuting}
+          />
+          <button
+            onClick={executeCommand}
+            disabled={!command.trim() || isExecuting}
+            className="p-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded transition-colors"
+          >
+            <Play size={16} />
+          </button>
+        </div>
+        
+        {/* Directory Contents */}
+        {workingDir?.contents && workingDir.contents.length > 0 && (
+          <div className="mt-3 text-xs">
+            <div className="text-gray-400 mb-1">Current directory contents:</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1 max-h-20 overflow-y-auto">
+              {workingDir.contents.map((item, index) => (
+                <div key={index} className="flex items-center space-x-1 text-gray-300">
+                  {item.type === 'directory' ? (
+                    <Folder size={10} className="text-blue-400" />
+                  ) : (
+                    <div className="w-2 h-2 bg-gray-500 rounded-full" />
+                  )}
+                  <span className="truncate">
+                    {item.name}
+                    {item.size && ` (${formatFileSize(item.size)})`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default TerminalInterface;

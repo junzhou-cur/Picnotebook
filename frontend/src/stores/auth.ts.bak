@@ -1,0 +1,164 @@
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import type { User, LoginForm, RegisterForm } from '@/types';
+
+interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  error: string | null;
+  
+  // Actions
+  login: (credentials: LoginForm) => Promise<void>;
+  register: (userData: RegisterForm) => Promise<any>;
+  logout: () => void;
+  setUser: (user: User | null) => void;
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  clearError: () => void;
+}
+
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set, get) => ({
+      user: null,
+      isAuthenticated: false,
+      isLoading: false,
+      error: null,
+
+      login: async (credentials: LoginForm) => {
+        set({ isLoading: true, error: null });
+        
+        try {
+          const BASE_URL = typeof window !== 'undefined' && (window.location.hostname === 'picnotebook.com' || window.location.hostname === 'www.picnotebook.com')
+            ? '""' 
+            : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+          
+          const loginData = {
+            email: credentials.username_or_email,
+            password: credentials.password
+          };
+          
+          console.log('Login attempt:', { 
+            url: `${BASE_URL}/auth/api/login`, 
+            data: { email: loginData.email ? '[PROVIDED]' : '[EMPTY]', password: loginData.password ? '[PROVIDED]' : '[EMPTY]' } 
+          });
+          
+          const response = await fetch(`${BASE_URL}/auth/api/login`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(loginData),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || 'Login failed');
+          }
+
+          // Store JWT tokens
+          if (data.access_token) {
+            localStorage.setItem('access_token', data.access_token);
+            localStorage.setItem('auth_token', data.access_token); // Also store for authService
+          }
+          if (data.refresh_token) {
+            localStorage.setItem('refresh_token', data.refresh_token);
+          }
+
+          set({
+            user: data.user,
+            isAuthenticated: true,
+            isLoading: false,
+            error: null,
+          });
+        } catch (error) {
+          set({
+            error: error instanceof Error ? error.message : 'Login failed',
+            isLoading: false,
+          });
+          throw error;
+        }
+      },
+
+      register: async (userData: RegisterForm) => {
+        set({ isLoading: true, error: null });
+        
+        try {
+          const BASE_URL = typeof window !== 'undefined' && (window.location.hostname === 'picnotebook.com' || window.location.hostname === 'www.picnotebook.com')
+            ? '""' 
+            : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+          const response = await fetch(`${BASE_URL}/auth/api/register`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              username: userData.username,
+              email: userData.email,
+              password: userData.password,
+              full_name: userData.full_name || (userData.first_name && userData.last_name ? userData.first_name + ' ' + userData.last_name : ''),
+            }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || 'Registration failed');
+          }
+
+          // Return registration result with admin status
+          set({ isLoading: false, error: null });
+          return data; // Contains is_admin flag for first user
+        } catch (error) {
+          set({
+            error: error instanceof Error ? error.message : 'Registration failed',
+            isLoading: false,
+          });
+          throw error;
+        }
+      },
+
+      logout: () => {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('currentUser');
+        sessionStorage.clear();
+        set({
+          user: null,
+          isAuthenticated: false,
+          error: null,
+        });
+      },
+
+      setUser: (user: User | null) => {
+        set({
+          user,
+          isAuthenticated: user !== null,
+        });
+      },
+
+      setLoading: (loading: boolean) => {
+        set({ isLoading: loading });
+      },
+
+      setError: (error: string | null) => {
+        set({ error });
+      },
+
+      clearError: () => {
+        set({ error: null });
+      },
+    }),
+    {
+      name: 'auth-storage',
+      partialize: (state) => ({
+        user: state.user,
+        isAuthenticated: state.isAuthenticated,
+      }),
+      skipHydration: true,
+    }
+  )
+);

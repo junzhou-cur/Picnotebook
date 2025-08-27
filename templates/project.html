@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}{{ project_name }} - Lab Notebook Processor{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>📁 {{ project_name }}</h1>
+            <div>
+                <a href="{{ url_for('generate_report', project_name=project_name) }}" class="btn btn-success">
+                    📊 Generate Report
+                </a>
+                <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+                    ← Back to Home
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Project Information -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5>📋 Project Information</h5>
+            </div>
+            <div class="card-body">
+                {% if project_info.hypothesis %}
+                    <div class="mb-3">
+                        <h6>Hypothesis</h6>
+                        <p class="text-muted">{{ project_info.hypothesis }}</p>
+                    </div>
+                {% endif %}
+                
+                {% if project_info.purpose %}
+                    <div class="mb-3">
+                        <h6>Purpose</h6>
+                        <p class="text-muted">{{ project_info.purpose }}</p>
+                    </div>
+                {% endif %}
+                
+                {% if project_info.current_progress %}
+                    <div class="mb-3">
+                        <h6>Current Progress</h6>
+                        <p class="text-muted" style="white-space: pre-line;">{{ project_info.current_progress }}</p>
+                    </div>
+                {% endif %}
+                
+                {% if project_info.created_date %}
+                    <div class="mb-0">
+                        <h6>Created</h6>
+                        <p class="text-muted">{{ project_info.created_date }}</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Lab Notes -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5>📝 Lab Notes ({{ notes|length }})</h5>
+            </div>
+            <div class="card-body">
+                {% if notes %}
+                    <div class="accordion" id="notesAccordion">
+                        {% for note in notes %}
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="heading{{ loop.index }}">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                                        data-bs-target="#collapse{{ loop.index }}" aria-expanded="false">
+                                    <div class="d-flex justify-content-between w-100 me-3">
+                                        <span>{{ note.filename }}</span>
+                                        <small class="text-muted">
+                                            {{ note.filename.split('_')[2].split('.')[0] if '_' in note.filename else '' }}
+                                        </small>
+                                    </div>
+                                </button>
+                            </h2>
+                            <div id="collapse{{ loop.index }}" class="accordion-collapse collapse" 
+                                 data-bs-parent="#notesAccordion">
+                                <div class="accordion-body">
+                                    <div class="markdown-content">
+                                        {{ note.content | replace('\n', '<br>') | safe }}
+                                    </div>
+                                    <hr>
+                                    <div class="d-flex justify-content-between">
+                                        <small class="text-muted">{{ note.filename }}</small>
+                                        <button class="btn btn-sm btn-outline-primary" onclick="copyToClipboard('{{ loop.index }}')">
+                                            📋 Copy
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="text-center py-4">
+                        <p class="text-muted">No lab notes yet for this project.</p>
+                        <a href="{{ url_for('index') }}" class="btn btn-primary">Add First Note</a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyToClipboard(noteIndex) {
+    const noteContent = document.querySelector(`#collapse${noteIndex} .markdown-content`).innerText;
+    navigator.clipboard.writeText(noteContent).then(function() {
+        // Show feedback
+        const btn = event.target;
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '✅ Copied!';
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-success');
+        
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.classList.remove('btn-success');
+            btn.classList.add('btn-outline-primary');
+        }, 2000);
+    }).catch(function(err) {
+        console.error('Could not copy text: ', err);
+        alert('Failed to copy to clipboard');
+    });
+}
+</script>
+{% endblock %}

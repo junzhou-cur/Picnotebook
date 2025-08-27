@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Create Project - Lab Notebook Processor{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow">
+            <div class="card-header">
+                <h4>🆕 Create New Research Project</h4>
+                <p class="text-muted mb-0">Set up a new project to organize your lab experiments and notes</p>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Project Name *</label>
+                        <input type="text" class="form-control" id="name" name="name" required
+                               placeholder="e.g., Protein Synthesis Study, Cell Culture Optimization">
+                        <div class="form-text">Choose a descriptive name for your research project</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="description" class="form-label">Project Description</label>
+                        <textarea class="form-control" id="description" name="description" rows="3"
+                                  placeholder="Brief overview of the project scope and goals"></textarea>
+                        <div class="form-text">A short summary of what this project encompasses</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="hypothesis" class="form-label">Research Hypothesis</label>
+                        <textarea class="form-control" id="hypothesis" name="hypothesis" rows="3"
+                                  placeholder="What do you expect to find or prove in this research?"></textarea>
+                        <div class="form-text">Your research hypothesis or expected outcomes</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="purpose" class="form-label">Research Purpose & Objectives</label>
+                        <textarea class="form-control" id="purpose" name="purpose" rows="3"
+                                  placeholder="What are the main goals and objectives of this research?"></textarea>
+                        <div class="form-text">The main objective or goal of your research</div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <h6>💡 Project Organization Tips:</h6>
+                        <ul class="mb-0">
+                            <li>Use specific, descriptive project names</li>
+                            <li>Define clear hypotheses to help with automatic note classification</li>
+                            <li>Projects help organize related experiments and track progress over time</li>
+                            <li>You can create multiple projects for different research areas</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <a href="{{ url_for('index') }}" class="btn btn-secondary">Cancel</a>
+                        <button type="submit" class="btn btn-success">
+                            <i class="fas fa-plus"></i> Create Project
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Quick Stats -->
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">📊 Your Research Portfolio</h5>
+                        <div class="row">
+                            <div class="col-6">
+                                <h3 class="text-primary">{{ current_user.projects.count() }}</h3>
+                                <small>Current Projects</small>
+                            </div>
+                            <div class="col-6">
+                                <h3 class="text-success">{{ current_user.lab_notes.count() }}</h3>
+                                <small>Total Lab Notes</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <h6>🔬 Recent Activity</h6>
+                        {% if current_user.projects.count() > 0 %}
+                            {% for project in current_user.projects.order_by('-updated_at').limit(3) %}
+                            <div class="d-flex justify-content-between align-items-center border-bottom py-2">
+                                <div>
+                                    <strong>{{ project.name }}</strong><br>
+                                    <small class="text-muted">{{ project.get_note_count() }} notes</small>
+                                </div>
+                                <small class="text-muted">{{ project.updated_at.strftime('%m/%d') if project.updated_at else '' }}</small>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-muted">No projects yet. This will be your first!</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Auto-save form data to localStorage
+const form = document.querySelector('form');
+const inputs = form.querySelectorAll('input, textarea');
+
+// Load saved data
+inputs.forEach(input => {
+    const saved = localStorage.getItem(`create_project_${input.name}`);
+    if (saved && input.value === '') {
+        input.value = saved;
+    }
+});
+
+// Save data on input
+inputs.forEach(input => {
+    input.addEventListener('input', function() {
+        localStorage.setItem(`create_project_${this.name}`, this.value);
+    });
+});
+
+// Clear saved data on successful submission
+form.addEventListener('submit', function() {
+    inputs.forEach(input => {
+        localStorage.removeItem(`create_project_${input.name}`);
+    });
+});
+
+// Character count for textareas
+document.querySelectorAll('textarea').forEach(textarea => {
+    const maxLength = 1000; // You can adjust this
+    
+    textarea.addEventListener('input', function() {
+        const remaining = maxLength - this.value.length;
+        let helpText = this.nextElementSibling;
+        
+        if (remaining < 100) {
+            helpText.innerHTML = helpText.innerHTML.split(' (')[0] + ` (${remaining} characters remaining)`;
+            if (remaining < 20) {
+                helpText.classList.add('text-warning');
+            }
+        }
+    });
+});
+</script>
+{% endblock %}

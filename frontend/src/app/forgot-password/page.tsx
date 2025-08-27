@@ -1,0 +1,193 @@
+'use client';
+
+import { useState } from 'react';
+import { motion } from 'framer-motion';
+import { 
+  Microscope, 
+  ArrowLeft, 
+  Mail, 
+  AlertCircle, 
+  CheckCircle,
+  Loader2 
+} from 'lucide-react';
+import Link from 'next/link';
+
+export default function ForgotPasswordPage() {
+  const [email, setEmail] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const BASE_URL = typeof window !== 'undefined' && (window.location.hostname === 'picnotebook.com' || window.location.hostname === 'www.picnotebook.com')
+        ? 'http://picnotebook.com/api' 
+        : process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005';
+      const response = await fetch(`${BASE_URL}/auth/api/forgot-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send reset email');
+      }
+
+      setIsSuccess(true);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to send reset email');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (isSuccess) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="w-full max-w-md"
+        >
+          <div className="text-center mb-8">
+            <Link href="/" className="inline-flex items-center space-x-3 mb-6">
+              <Microscope className="w-10 h-10 text-lab-primary" />
+              <span className="text-2xl font-bold text-gray-900">Lab Notebook</span>
+            </Link>
+            <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-4" />
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+              Check Your Email 📧
+            </h1>
+            <p className="text-gray-600">
+              We've sent password reset instructions to <strong>{email}</strong>
+            </p>
+          </div>
+
+          <div className="card">
+            <div className="card-body text-center">
+              <p className="text-gray-600 mb-6">
+                If you don't see the email, check your spam folder or try again with a different email address.
+              </p>
+              
+              <div className="space-y-3">
+                <button
+                  onClick={() => {
+                    setIsSuccess(false);
+                    setEmail('');
+                  }}
+                  className="btn-outline w-full"
+                >
+                  Try Another Email
+                </button>
+                
+                <Link href="/login" className="btn-primary w-full inline-block text-center">
+                  Back to Login
+                </Link>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6 }}
+        className="w-full max-w-md"
+      >
+        {/* Header */}
+        <div className="text-center mb-8">
+          <Link href="/" className="inline-flex items-center space-x-3 mb-6">
+            <Microscope className="w-10 h-10 text-lab-primary" />
+            <span className="text-2xl font-bold text-gray-900">Lab Notebook</span>
+          </Link>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            Reset Password 🔐
+          </h1>
+          <p className="text-gray-600">
+            Enter your email address and we'll send you instructions to reset your password
+          </p>
+        </div>
+
+        {/* Reset Form */}
+        <div className="card">
+          <div className="card-body">
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center space-x-3"
+              >
+                <AlertCircle className="w-5 h-5 text-red-600" />
+                <div>
+                  <p className="text-sm font-medium text-red-800">Reset Failed</p>
+                  <p className="text-sm text-red-600">{error}</p>
+                </div>
+              </motion.div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <input
+                    type="email"
+                    id="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="input-field pl-12"
+                    placeholder="Enter your email address"
+                    required
+                    disabled={isLoading}
+                  />
+                  <Mail className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="btn-primary w-full flex items-center justify-center space-x-2"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Sending...</span>
+                  </>
+                ) : (
+                  <>
+                    <Mail className="w-5 h-5" />
+                    <span>Send Reset Instructions</span>
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
+
+        {/* Back to Login */}
+        <div className="text-center mt-6">
+          <Link href="/login" className="inline-flex items-center text-lab-primary hover:text-blue-700 font-medium">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Login
+          </Link>
+        </div>
+      </motion.div>
+    </div>
+  );
+}

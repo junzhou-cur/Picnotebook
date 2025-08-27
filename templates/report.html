@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}Report: {{ project_name }} - Lab Notebook Processor{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>📊 Project Report: {{ project_name }}</h1>
+            <div>
+                <button class="btn btn-outline-primary" onclick="printReport()">🖨️ Print</button>
+                <button class="btn btn-primary" onclick="copyReport()">📋 Copy</button>
+                <a href="{{ url_for('view_project', project_name=project_name) }}" class="btn btn-outline-secondary">
+                    ← Back to Project
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5>📋 Comprehensive Report</h5>
+                    <small class="text-muted">Generated on {{ moment().format('YYYY-MM-DD HH:mm') }}</small>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="reportContent" class="report-content">
+                    {{ report | replace('\n', '<br>') | safe }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.report-content {
+    line-height: 1.6;
+    font-family: 'Georgia', serif;
+}
+
+.report-content h1, .report-content h2, .report-content h3 {
+    color: #2c3e50;
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+.report-content h1 {
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 0.3em;
+}
+
+.report-content h2 {
+    border-bottom: 1px solid #bdc3c7;
+    padding-bottom: 0.2em;
+}
+
+.report-content ul, .report-content ol {
+    margin-left: 1.5em;
+}
+
+.report-content blockquote {
+    border-left: 4px solid #3498db;
+    margin: 1em 0;
+    padding-left: 1em;
+    color: #7f8c8d;
+    font-style: italic;
+}
+
+.report-content table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+}
+
+.report-content th, .report-content td {
+    border: 1px solid #bdc3c7;
+    padding: 0.5em;
+    text-align: left;
+}
+
+.report-content th {
+    background-color: #ecf0f1;
+    font-weight: bold;
+}
+
+@media print {
+    .navbar, .btn, .card-header {
+        display: none !important;
+    }
+    
+    .card {
+        border: none !important;
+        box-shadow: none !important;
+    }
+    
+    .report-content {
+        font-size: 12pt;
+        color: #000;
+    }
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function printReport() {
+    window.print();
+}
+
+function copyReport() {
+    const reportContent = document.getElementById('reportContent').innerText;
+    navigator.clipboard.writeText(reportContent).then(function() {
+        // Show feedback
+        const btn = event.target;
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '✅ Copied!';
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-success');
+        
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.classList.remove('btn-success');
+            btn.classList.add('btn-primary');
+        }, 2000);
+    }).catch(function(err) {
+        console.error('Could not copy text: ', err);
+        alert('Failed to copy to clipboard');
+    });
+}
+
+// Format markdown-like content
+document.addEventListener('DOMContentLoaded', function() {
+    const content = document.getElementById('reportContent');
+    let html = content.innerHTML;
+    
+    // Convert markdown-style headers
+    html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+    html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+    html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+    
+    // Convert bold text
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // Convert italic text
+    html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    
+    // Convert bullet points
+    html = html.replace(/^[\s]*\* (.*$)/gim, '<li>$1</li>');
+    html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+    
+    content.innerHTML = html;
+});
+</script>
+{% endblock %}

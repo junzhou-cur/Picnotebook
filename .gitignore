@@ -1,0 +1,162 @@
+# Environment variables
+.env
+.env.local
+!.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+lab_notebook.db
+lab_notebook_production.db
+lab_records.db
+sequences.db
+
+# Logs
+*.log
+logs/
+backend*.log
+frontend*.log
+server.log
+tunnel.log
+celery.log
+
+# Uploads and user content
+uploads/
+projects/
+static/uploads/
+instance/
+
+# Node.js/Frontend
+node_modules/
+.next/
+.cache/
+dist/
+build/
+*.tsbuildinfo
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Deployment files
+*.tar.gz
+*.zip
+deploy_package/
+deploy/
+deploy_light/
+backup*.tar.gz
+picnotebook*.tar.gz
+
+# SSH keys
+*.pem
+*.key
+
+# Temporary files
+*.tmp
+*.temp
+cookies.txt
+
+# Migration files (keep structure, ignore specific migrations)
+migrations/versions/
+
+# PM2
+.pm2/
+ecosystem.config.js.backup
+
+# Coverage reports
+.coverage
+htmlcov/
+.coveragerc
+
+# Test files
+.pytest_cache/
+test_*
+
+# AWS and deployment
+appspec.yml
+buildspec*.yml
+
+# BMad
+.bmad/
+.bmad-core/
+bmad-config.json
+bmad-core/
+
+# Documentation (keep only essential)
+DEPLOYMENT_GUIDE.md
+CI_CD_DEPLOYMENT_GUIDE.md
+EC2_DEPLOYMENT_GUIDE.md
+IMPROVEMENTS.md
+NETWORK_SETUP.md
+PORT_FORWARDING_GUIDE.md
+improvements-analysis.md
+production_setup.md
+quick_restart_guide.md
+
+# Scripts (keep only essential deployment script)
+deploy*.sh
+!setup-ec2-production.sh
+start_*.sh
+!start_local_development.sh
+restart_all.sh
+fix_*.sh
+setup_*.sh
+!setup-ec2-production.sh
+update_*.sh
+validate_*.sh
+download_*.sh
+
+# Nginx configs (except production)
+nginx*.conf
+!nginx.conf
+
+# Desktop app
+desktop/
+
+# Infrastructure
+infrastructure/
+monitoring/
+services/
+
+# Jupyter/Research files
+*.ipynb
+ngs_*.py
+miseq.py
+complete_ngs_workflow.py
+chart_api.py
+experiment_api.py
+experiment_generator.py
+check_user.py
+minimal_app.py
+ngs_ecosystem.config.js
+reset_password.py
+security_*.py
+security_*.json
+table_detector.py
+update_db.py
+setup_sequences_db.py
+
+# GitHub workflows
+.github/

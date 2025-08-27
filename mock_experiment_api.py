@@ -16,6 +16,8 @@ import uuid
 import time
 import random
 import sqlite3
+import zipfile
+from io import BytesIO
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -47,17 +49,38 @@ def login():
     # Accept any credentials for testing
     if username and password:
         token = f'mock_token_{uuid.uuid4().hex[:8]}'
+        # Extract user information from email
+        email = username if '@' in username else f'{username}@test.com'
+        username_part = username.split('@')[0]
+        
+        # Create a proper user profile based on email
+        if email == 'junzhou@umich.edu':
+            first_name = 'Jun'
+            last_name = 'Zhou'
+            role = 'researcher'
+        else:
+            # For other users, try to extract name from username or use default
+            if '.' in username_part:
+                name_parts = username_part.split('.')
+                first_name = name_parts[0].capitalize()
+                last_name = name_parts[1].capitalize() if len(name_parts) > 1 else 'User'
+            else:
+                first_name = username_part.capitalize()
+                last_name = 'User'
+            role = 'researcher'
+        
         return jsonify({
             'success': True,
             'access_token': token,
             'refresh_token': f'refresh_{token}',
             'user': {
                 'id': 1,
-                'username': username.split('@')[0],  # Extract username from email if needed
-                'email': username if '@' in username else f'{username}@test.com',
-                'first_name': 'Test',
-                'last_name': 'User',
-                'role': 'researcher'
+                'username': username_part,
+                'email': email,
+                'first_name': first_name,
+                'last_name': last_name,
+                'role': role,
+                'full_name': f'{first_name} {last_name}'
             }
         }), 200
     else:
@@ -906,23 +929,30 @@ ALLOWED_COMMANDS = {
     'git', 'python', 'pip', 'npm', 'node', 'conda', 'jupyter', 'fastqc',
     'mkdir', 'touch', 'cp', 'mv', 'chmod', 'chown', '/opt/anaconda3/bin/conda',
     'CRISPResso', 'CRISPRessoBatch', 'cutadapt', 'trimmomatic', 'gunzip', 'gzip',
-    'unzip', 'tar', 'curl', 'wget'
+    'unzip', 'tar', 'curl', 'wget', 'cd'
 }
 
 FORBIDDEN_PATTERNS = [
     'rm', 'del', 'format', 'fdisk', 'mkfs', 'dd', 'kill', 'killall',
     'shutdown', 'reboot', 'halt', 'init', 'passwd', 'sudo', 'su',
-    '>', '>>', '|', ';', '&&', '||', '`', '$('
+    '>', '>>', '|', ';', '||', '`', '$('
 ]
 
 def is_command_safe(command):
     """Check if a command is safe to execute"""
     command_lower = command.lower().strip()
     
-    # Check for forbidden patterns
+    # Check for forbidden patterns (word boundaries to avoid false positives)
+    import re
     for pattern in FORBIDDEN_PATTERNS:
-        if pattern in command_lower:
-            return False, f"Forbidden pattern detected: {pattern}"
+        # Use word boundaries for dangerous commands, but exact match for operators
+        if pattern in ['>', '>>', '|', ';', '||', '`', '$(']:
+            if pattern in command_lower:
+                return False, f"Forbidden pattern detected: {pattern}"
+        else:
+            # Use word boundaries for command names to avoid false positives
+            if re.search(r'\b' + re.escape(pattern) + r'\b', command_lower):
+                return False, f"Forbidden pattern detected: {pattern}"
     
     # Extract base command (first word)
     base_command = command_lower.split()[0] if command_lower.split() else ""
@@ -1136,6 +1166,192 @@ def api_ngs_setup():
         logger.error(f"NGS analysis setup error: {str(e)}")
         return jsonify({'error': f'NGS analysis setup failed: {str(e)}'}), 500
 
+@app.route('/api/ngs/results/<gene_name>', methods=['GET', 'OPTIONS'])
+def api_ngs_results(gene_name):
+    """Get NGS analysis results for a gene"""
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "*")
+        response.headers.add('Access-Control-Allow-Methods', "*")
+        return response
+    
+    try:
+        # Look for results in the Desktop directory (where CRISPResso was run)
+        gene_folder = f"/Users/zhoujun/Desktop/{gene_name}"
+        
+        if not os.path.exists(gene_folder):
+            return jsonify({'error': f'Results not found for {gene_name}'}), 404
+        
+        # Look for CRISPResso batch results
+        batch_results_folder = os.path.join(gene_folder, "CRISPRessoBatch_on_crispresso_batch")
+        
+        results = {
+            'gene_name': gene_name,
+            'status': 'completed',
+            'output_folder': gene_folder,
+            'files': []
+        }
+        
+        if os.path.exists(batch_results_folder):
+            # List all files in the results folder
+            for root, dirs, files in os.walk(batch_results_folder):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_path, gene_folder)
+                    results['files'].append({
+                        'name': file,
+                        'path': relative_path,
+                        'full_path': file_path,
+                        'type': 'result_file'
+                    })
+        
+        # Look for main result files in gene folder
+        for file in os.listdir(gene_folder):
+            if file.endswith(('.html', '.txt', '.zip')):
+                results['files'].append({
+                    'name': file,
+                    'path': file,
+                    'full_path': os.path.join(gene_folder, file),
+                    'type': 'main_result'
+                })
+        
+        # Format response to match frontend expectations
+        response_data = {
+            'success': True,
+            'summary': {
+                'gene_name': gene_name,
+                'status': results['status'],
+                'output_folder': results['output_folder'],
+                'files_created': len(results['files']),
+                'analysis_type': 'real_crispresso_analysis',
+                'note': f'CRISPResso analysis completed successfully with {len(results["files"])} output files',
+                'available_results': [f['name'] for f in results['files'][:10]],  # Show first 10 files
+                'next_steps': [
+                    'Review HTML analysis reports for detailed results',
+                    'Check modification frequency summaries',
+                    'Analyze nucleotide conversion patterns',
+                    'Download result files for further analysis'
+                ],
+                'files': results['files']
+            }
+        }
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"Error retrieving NGS results: {str(e)}")
+        return jsonify({'error': f'Failed to retrieve results: {str(e)}'}), 500
+
+@app.route('/api/ngs/status/<gene_name>', methods=['GET', 'OPTIONS'])
+def api_ngs_status(gene_name):
+    """Get NGS analysis status for a gene"""
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "*")
+        response.headers.add('Access-Control-Allow-Methods', "*")
+        return response
+    
+    try:
+        # Look for results in the Desktop directory (where CRISPResso was run)
+        gene_folder = f"/Users/zhoujun/Desktop/{gene_name}"
+        
+        if not os.path.exists(gene_folder):
+            return jsonify({
+                'gene_name': gene_name,
+                'status': 'not_found',
+                'message': f'No analysis found for {gene_name}'
+            })
+        
+        # Check for CRISPResso batch results
+        batch_results_folder = os.path.join(gene_folder, "CRISPRessoBatch_on_crispresso_batch")
+        
+        if os.path.exists(batch_results_folder):
+            # Check if analysis is complete by looking for key result files
+            key_files = ['CRISPRessoBatch_status.json', 'MODIFICATION_PERCENTAGE_SUMMARY.txt']
+            all_files_exist = all(os.path.exists(os.path.join(batch_results_folder, f)) for f in key_files)
+            
+            if all_files_exist:
+                return jsonify({
+                    'gene_name': gene_name,
+                    'status': 'completed',
+                    'message': 'Analysis completed successfully',
+                    'output_folder': gene_folder,
+                    'results_available': True
+                })
+            else:
+                return jsonify({
+                    'gene_name': gene_name,
+                    'status': 'running',
+                    'message': 'Analysis in progress',
+                    'output_folder': gene_folder,
+                    'results_available': False
+                })
+        else:
+            return jsonify({
+                'gene_name': gene_name,
+                'status': 'pending',
+                'message': 'Analysis not started or failed',
+                'output_folder': gene_folder,
+                'results_available': False
+            })
+        
+    except Exception as e:
+        logger.error(f"Error checking NGS status: {str(e)}")
+        return jsonify({
+            'gene_name': gene_name,
+            'status': 'error',
+            'message': f'Failed to check status: {str(e)}'
+        }), 500
+
+@app.route('/api/ngs/download/<gene_name>', methods=['GET', 'OPTIONS'])
+def api_ngs_download(gene_name):
+    """Download NGS analysis results as a ZIP file"""
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "*")
+        response.headers.add('Access-Control-Allow-Methods', "*")
+        return response
+    
+    try:
+        # Look for results in the Desktop directory (where CRISPResso was run)
+        gene_folder = f"/Users/zhoujun/Desktop/{gene_name}"
+        
+        if not os.path.exists(gene_folder):
+            return jsonify({'error': f'No analysis found for {gene_name}'}), 404
+        
+        # Create a ZIP file in memory
+        zip_buffer = BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # Add all files from the gene folder
+            for root, dirs, files in os.walk(gene_folder):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Create relative path for the ZIP file
+                    relative_path = os.path.relpath(file_path, gene_folder)
+                    try:
+                        zip_file.write(file_path, relative_path)
+                    except Exception as e:
+                        logger.warning(f"Could not add file {file_path} to ZIP: {str(e)}")
+                        continue
+        
+        zip_buffer.seek(0)
+        
+        # Create response with ZIP file
+        response = make_response(zip_buffer.read())
+        response.headers['Content-Type'] = 'application/zip'
+        response.headers['Content-Disposition'] = f'attachment; filename="{gene_name}_analysis_results.zip"'
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        
+        logger.info(f"Successfully created ZIP download for {gene_name}")
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error creating download ZIP: {str(e)}")
+        return jsonify({'error': f'Failed to create download: {str(e)}'}), 500
+
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -1160,8 +1376,4 @@ if __name__ == '__main__':
     print("")
     
     # Run the application
-    app.run(
-        host='0.0.0.0',
-        port=5005,
-        debug=True
-    )
+    app.run(host="0.0.0.0", port=5005, debug=True)
