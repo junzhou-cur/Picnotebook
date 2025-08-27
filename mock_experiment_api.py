@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000", "http://localhost:3002", "https://picnotebook.com"])
+CORS(app, origins=["http://localhost:3000", "http://localhost:3002", "http://127.0.0.1:3000", "http://127.0.0.1:3002", "http://0.0.0.0:3002", "https://picnotebook.com"])
 
 # Configuration
 UPLOAD_FOLDER = 'uploads'
@@ -85,6 +85,59 @@ def login():
         }), 200
     else:
         return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+
+# Google OAuth endpoints
+@app.route('/auth/google/login', methods=['POST'])
+def google_login():
+    """Mock Google OAuth login endpoint"""
+    data = request.get_json()
+    google_token = data.get('token', '')
+    google_id = data.get('google_id', '')
+    email = data.get('email', '')
+    name = data.get('name', '')
+    
+    # Mock Google OAuth validation - in production, validate token with Google
+    if google_token and email:
+        token = f'mock_token_{uuid.uuid4().hex[:8]}'
+        
+        # Extract names
+        name_parts = name.split(' ') if name else email.split('@')[0].split('.')
+        first_name = name_parts[0].capitalize() if name_parts else 'User'
+        last_name = ' '.join(name_parts[1:]).capitalize() if len(name_parts) > 1 else 'Google'
+        
+        return jsonify({
+            'success': True,
+            'access_token': token,
+            'refresh_token': f'refresh_{token}',
+            'user': {
+                'id': hash(email) % 10000,  # Generate consistent ID from email
+                'username': email.split('@')[0],
+                'email': email,
+                'first_name': first_name,
+                'last_name': last_name,
+                'role': 'researcher',
+                'full_name': f'{first_name} {last_name}',
+                'google_id': google_id,
+                'provider': 'google'
+            }
+        }), 200
+    else:
+        return jsonify({'success': False, 'message': 'Invalid Google token'}), 401
+
+@app.route('/auth/google/callback', methods=['GET', 'POST'])
+def google_callback():
+    """Mock Google OAuth callback endpoint"""
+    # In production, this would handle the OAuth callback from Google
+    # For mock purposes, we'll just return a success message
+    code = request.args.get('code', '')
+    if code:
+        return jsonify({
+            'message': 'Google OAuth callback received',
+            'code': code,
+            'redirect_to': '/dashboard'
+        }), 200
+    else:
+        return jsonify({'error': 'No authorization code provided'}), 400
 
 @app.route('/register', methods=['POST'])
 @app.route('/auth/api/register', methods=['POST'])

@@ -2,6 +2,14 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User, LoginForm, RegisterForm } from '@/types';
 
+interface GoogleLoginData {
+  token: string;
+  google_id: string;
+  email: string;
+  name: string;
+  picture?: string;
+}
+
 interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
@@ -10,6 +18,7 @@ interface AuthState {
   
   // Actions
   login: (credentials: LoginForm) => Promise<void>;
+  loginWithGoogle: (googleData: GoogleLoginData) => Promise<void>;
   register: (userData: RegisterForm) => Promise<any>;
   logout: () => void;
   setUser: (user: User | null) => void;
@@ -76,6 +85,63 @@ export const useAuthStore = create<AuthState>()(
         } catch (error) {
           set({
             error: error instanceof Error ? error.message : 'Login failed',
+            isLoading: false,
+          });
+          throw error;
+        }
+      },
+
+      loginWithGoogle: async (googleData: GoogleLoginData) => {
+        set({ isLoading: true, error: null });
+        
+        try {
+          const BASE_URL = typeof window !== 'undefined' && (window.location.hostname === 'picnotebook.com' || window.location.hostname === 'www.picnotebook.com')
+            ? '""' 
+            : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5005';
+          
+          console.log('Google login attempt:', { 
+            url: `${BASE_URL}/auth/google/login`, 
+            email: googleData.email,
+            name: googleData.name
+          });
+          
+          const response = await fetch(`${BASE_URL}/auth/google/login`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(googleData),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || data.message || 'Google login failed');
+          }
+
+          // Store JWT tokens
+          if (data.access_token) {
+            localStorage.setItem('access_token', data.access_token);
+            localStorage.setItem('auth_token', data.access_token);
+          }
+          if (data.refresh_token) {
+            localStorage.setItem('refresh_token', data.refresh_token);
+          }
+
+          // Store Google-specific data
+          if (googleData.picture) {
+            localStorage.setItem('user_avatar', googleData.picture);
+          }
+
+          set({
+            user: data.user,
+            isAuthenticated: true,
+            isLoading: false,
+            error: null,
+          });
+        } catch (error) {
+          set({
+            error: error instanceof Error ? error.message : 'Google login failed',
             isLoading: false,
           });
           throw error;

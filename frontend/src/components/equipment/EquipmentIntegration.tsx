@@ -777,7 +777,7 @@ export const EquipmentIntegration: React.FC<EquipmentIntegrationProps> = ({
                   label="API Endpoint (Optional)"
                   value={equipmentForm.api_endpoint}
                   onChange={(e) => setEquipmentForm(prev => ({ ...prev, api_endpoint: e.target.value }))}
-                  placeholder="e.g., http://192.168.1.100:8080"
+                  placeholder="API endpoint URL (optional)"
                 />
               </div>
 

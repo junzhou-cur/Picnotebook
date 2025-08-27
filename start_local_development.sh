@@ -3,8 +3,12 @@
 # Local Development Startup Script with Auto-Configuration
 # This script starts the mock API, frontend, and configuration watcher
 
+# Get the directory where the script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
 echo "🚀 Starting PicNotebook Local Development Environment"
 echo "=================================================="
+echo "📁 Working directory: $SCRIPT_DIR"
 
 # Check if enhanced startup is available
 if [ -f "config-watcher.js" ] && command -v node &> /dev/null; then
@@ -33,7 +37,7 @@ sleep 2
 # Start the configuration watcher first (if available)
 if [ "$USE_WATCHER" = true ]; then
     echo "🔍 Starting Auto-Configuration Watcher..."
-    cd /Users/zhoujun/Desktop/Claude/picnotebook
+    cd "$SCRIPT_DIR"
     node config-watcher.js &
     WATCHER_PID=$!
     echo "   Watcher started (PID: $WATCHER_PID)"
@@ -42,7 +46,7 @@ fi
 
 # Start the mock experiment API
 echo "📡 Starting Mock Experiment API on http://127.0.0.1:5005"
-cd /Users/zhoujun/Desktop/Claude/picnotebook
+cd "$SCRIPT_DIR"
 python mock_experiment_api.py &
 API_PID=$!
 
@@ -51,12 +55,39 @@ sleep 3
 
 # Start the frontend
 echo "🌐 Starting Frontend on http://127.0.0.1:3002"
-cd /Users/zhoujun/Desktop/Claude/picnotebook/frontend
+cd "$SCRIPT_DIR/frontend"
 npm run dev &
 FRONTEND_PID=$!
 
+# Wait for frontend to be ready
+echo "⏳ Waiting for frontend to be ready..."
+for i in {1..30}; do
+    if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3002 | grep -q "200"; then
+        echo "✅ Frontend is ready!"
+        break
+    fi
+    sleep 1
+done
+
 echo ""
 echo "✅ Development environment started!"
+
+# Open browser automatically
+echo "🌐 Opening browser..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS
+    open http://127.0.0.1:3002
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Linux
+    if command -v xdg-open &> /dev/null; then
+        xdg-open http://127.0.0.1:3002
+    elif command -v gnome-open &> /dev/null; then
+        gnome-open http://127.0.0.1:3002
+    fi
+elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
+    # Windows
+    start http://127.0.0.1:3002
+fi
 
 if [ "$USE_WATCHER" = true ]; then
     echo "🔍 Auto-Configuration Watcher: ACTIVE (PID: $WATCHER_PID)"

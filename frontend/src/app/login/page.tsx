@@ -14,6 +14,9 @@ import {
   Loader2 
 } from 'lucide-react';
 import Link from 'next/link';
+import GoogleOAuthManager from '@/components/auth/GoogleOAuthManager';
+import { isGoogleOAuthConfigured } from '@/config/google-oauth';
+import Footer from '@/components/layout/Footer';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -69,24 +72,26 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        className="w-full max-w-md"
-      >
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex flex-col">
+      {/* Main Content */}
+      <div className="flex-1 flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="w-full max-w-md"
+        >
         {/* Header */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center space-x-3 mb-6">
             <Microscope className="w-10 h-10 text-lab-primary" />
-            <span className="text-2xl font-bold text-gray-900">Lab Notebook</span>
+            <span className="text-2xl font-bold text-gray-900">PicNotebook</span>
           </Link>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
             Welcome Back! 🔬
           </h1>
           <p className="text-gray-600">
-            Sign in to your lab notebook account
+            Sign in to your PicNotebook account
           </p>
         </div>
 
@@ -196,6 +201,23 @@ export default function LoginPage() {
                 )}
               </button>
             </form>
+
+            {/* Google Login */}
+            <>
+              <div className="relative my-6">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-200"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white text-gray-500">Or continue with</span>
+                </div>
+              </div>
+
+              <GoogleOAuthManager 
+                onSuccess={() => router.push('/dashboard')}
+                disabled={isLoading}
+              />
+            </>
           </div>
         </div>
 
@@ -209,7 +231,11 @@ export default function LoginPage() {
           </p>
         </div>
 
-      </motion.div>
+        </motion.div>
+      </div>
+      
+      {/* Footer */}
+      <Footer />
     </div>
   );
 }

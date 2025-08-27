@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h1>PicNotebook API Connection Test</h1>
+    <div id="env-vars"></div>
+    <button onclick="testLogin()">Test Login</button>
+    <div id="result"></div>
+
+    <script>
+        // Show environment variables
+        document.getElementById('env-vars').innerHTML = `
+            <h3>Current Configuration:</h3>
+            <p>API URL from env: ${process.env.NEXT_PUBLIC_API_URL || 'NOT SET'}</p>
+            <p>Window location: ${window.location.origin}</p>
+        `;
+
+        async function testLogin() {
+            const apiUrl = 'http://127.0.0.1:5005';
+            document.getElementById('result').innerHTML = 'Testing...';
+            
+            try {
+                const response = await fetch(`${apiUrl}/auth/api/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: 'test@example.com',
+                        password: 'password123'
+                    })
+                });
+                
+                const data = await response.json();
+                document.getElementById('result').innerHTML = `
+                    <h3>Success!</h3>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <h3>Error:</h3>
+                    <pre>${error.message}</pre>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
